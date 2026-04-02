@@ -53,3 +53,10 @@ jspm_packages/
 
 # Aider AI Chat
 .aider*
+
+# frontend
+education/docs/current
+education/public/frontend
+education/www/education.html
+education/www/student-portal.html
+./node_modules

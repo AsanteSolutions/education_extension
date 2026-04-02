@@ -83,6 +83,12 @@ function setStudentGroup() {
       (group.onClick = () => {
         if (group.label === selectedGroup.value) return
         selectedGroup.value = group.label
+  attendanceResource.update({
+    params: {
+      student: studentInfo.name,
+      student_group: selectedGroup.value,
+    },
+  })
         attendanceResource.reload()
       })
   )
@@ -90,8 +96,8 @@ function setStudentGroup() {
     allStudentGroups.value[0].label || 'Select Student Group'
   attendanceResource.update({
     params: {
-      student_group: selectedGroup.value,
       student: studentInfo.name,
+      student_group: selectedGroup.value,
     },
   })
   attendanceResource.reload()
@@ -115,8 +121,8 @@ const attendanceStatus = {
 const attendanceResource = createResource({
   url: 'education.education.api.get_student_attendance',
   params: {
-    student_group: selectedGroup.value,
     student: studentInfo.name,
+    student_group: selectedGroup.value,
   },
   transform: (attendance) => {
     // filter attendance to remove duplicate attendance data

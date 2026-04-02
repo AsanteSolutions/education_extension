@@ -55,8 +55,8 @@ jspm_packages/
 .aider*
 
 # frontend
-education/docs/current
-education/public/frontend
-education/www/education.html
-education/www/student-portal.html
+education_extension/docs/current
+education_extension/public/frontend
+education_extension/www/education.html
+education_extension/www/student-portal.html
 ./node_modules

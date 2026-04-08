@@ -7,15 +7,6 @@
         {{ currentRoute }}
       </h3>
     </div>
-    <div class="flex flex-row gap-2">
-      <Button
-        v-if="currentRoute === 'Attendance'"
-        variant="solid"
-        label="Apply for Leave"
-        @click="setIsAttendancePage(true)"
-        icon-left="plus"
-      />
-    </div>
   </header>
 </template>
 <script setup>

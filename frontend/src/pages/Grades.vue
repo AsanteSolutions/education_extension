@@ -103,6 +103,7 @@ const grades = createListResource({
   filters: {
     student: studentInfo.name,
     program: currentProgram.program,
+    docstatus: '1',
     // student:"EDU-STU-2023-00005",
     // program:"Comp Science"
   },
@@ -139,7 +140,7 @@ const grades = createListResource({
         }
       })
       row.dp = assignments == 2 && tests == 2 ? `${+dp.toFixed(2)}%` : '-'
-      row.final_mark = final_mark != 0 ?`${+final_mark.toFixed(2)}%` : '-'
+      row.final_mark = (row.dp !== '-' && final_mark != 0) ?`${+final_mark.toFixed(2)}%` : '-'
       tableData.value.rows.push(row)
     })
   },
@@ -157,6 +158,8 @@ const updateColumns = (exams) => {
     label: 'DP',
     key: 'dp',
   })
+  const length = tableData.value.columns.length;
+  [tableData.value.columns[length - 1], tableData.value.columns[length - 2] ] = [tableData.value.columns[length - 2], tableData.value.columns[length - 1]]
   tableData.value.columns.push({
     label: 'Final Mark',
     key: 'final_mark',

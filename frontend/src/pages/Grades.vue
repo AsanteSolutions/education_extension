@@ -1,5 +1,6 @@
 <template lang="">
-  <div v-if="grades.data?.length > 0">
+ <!-- <div v-if="grades.data?.length > 0">-->
+  <div>
     <div class="px-5 py-4">
       <Dropdown class="mb-4" :options="allPrograms">
         <template #default="{ open }">
@@ -26,9 +27,9 @@
       />
     </div>
   </div>
-  <div v-else>
+ <!-- <div v-else>
     <MissingData message="No grades found" />
-  </div>
+  </div> -->
 </template>
 <script setup>
 import {
@@ -79,7 +80,18 @@ const student_programs = createResource({
     response.forEach((program) => {
       programs.push({
         label: program.program,
-        onClick: () => (selectedProgram.value = program.program),
+        onClick: () => {
+          if (selectedProgram.value === program.program) return  
+          selectedProgram.value = program.program
+          grades.update({
+            filters: {
+              student: studentInfo.name,
+              program: selectedProgram.value,
+              docstatus: '1',
+            },
+          })
+          grades.reload()
+        },
       })
     })
     selectedProgram.value = programs[programs.length - 1].label
@@ -110,6 +122,17 @@ const grades = createListResource({
   transform: () => {},
 
   onSuccess: (response) => {
+    // Clear previous data
+    tableData.value.rows = []
+    tableData.value.columns = [
+      {
+        label: 'Course',
+        key: 'course',
+      },
+    ]
+    
+    const numberOfAssignments = 2
+    const numberOfTests = 2
     let conductedExams = groupBy(response, (row) => row.assessment_group)
     let exams = Object.keys(conductedExams)
     updateColumns(exams)
@@ -126,20 +149,10 @@ const grades = createListResource({
         let examData = conductedExams[exam].find((row) => row.course === course)
         row[exam] = examData
           ? `${+(parseFloat(examData.total_score) / parseFloat(examData.maximum_score) * 100.0).toFixed(2)}%`
-          : '-'
-	  if (examData && examData.custom_assessment_type == 'Exam') {
-	    final_mark += (dp / 100.0 * 50.0) + (parseFloat(examData.total_score) / parseFloat(examData.maximum_score) * 50.0)
-	  }
-	  else if (examData && examData.custom_assessment_type == 'Test') {
-            tests++
-	    dp += parseFloat(examData.total_score) / parseFloat(examData.maximum_score) * 30.0 
-	  }
-	  else if (examData && examData.custom_assessment_type == 'Assignment') {
-	    assignments++
-            dp += parseFloat(examData.total_score) / parseFloat(examData.maximum_score) * 20.0
-        }
+          : '-';
+          ({ dp, final_mark, tests, assignments} = calculateDPAndFinalMark(examData, tests, assignments, dp, final_mark))
       })
-      row.dp = assignments == 2 && tests == 2 ? `${+dp.toFixed(2)}%` : '-'
+      row.dp = assignments == numberOfAssignments && tests == numberOfTests ? `${+dp.toFixed(2)}%` : '-'
       row.final_mark = (row.dp !== '-' && final_mark != 0) ?`${+final_mark.toFixed(2)}%` : '-'
       tableData.value.rows.push(row)
     })
@@ -158,11 +171,33 @@ const updateColumns = (exams) => {
     label: 'DP',
     key: 'dp',
   })
+
   const length = tableData.value.columns.length;
-  [tableData.value.columns[length - 1], tableData.value.columns[length - 2] ] = [tableData.value.columns[length - 2], tableData.value.columns[length - 1]]
+  for (let i = length - 1; tableData.value.columns[i-1].key.toLowerCase().includes('exam') ||
+   tableData.value.columns[i-1].key.toLowerCase().includes('practical') ||
+   tableData.value.columns[i-1].key.toLowerCase().includes('oral'); i--) {
+    [tableData.value.columns[i], tableData.value.columns[i - 1]] = [tableData.value.columns[i - 1], tableData.value.columns[i]]
+  }
+
   tableData.value.columns.push({
     label: 'Final Mark',
     key: 'final_mark',
   })
+}
+
+const calculateDPAndFinalMark = (examData, tests, assignments, dp, final_mark) => {
+	      if (examData && examData.custom_assessment_type == 'Exam') {
+	        final_mark += (dp / 100.0 * 50.0) + (parseFloat(examData.total_score) / parseFloat(examData.maximum_score) * 50.0)
+	      }
+	      else if (examData && examData.custom_assessment_type == 'Test') {
+          tests++
+	        dp += parseFloat(examData.total_score) / parseFloat(examData.maximum_score) * 30.0 
+        }
+	      else if (examData && examData.custom_assessment_type == 'Assignment') {
+	        assignments++
+          dp += parseFloat(examData.total_score) / parseFloat(examData.maximum_score) * 20.0
+        }
+        
+        return { dp, final_mark, tests, assignments }
 }
 </script>

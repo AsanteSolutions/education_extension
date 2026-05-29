@@ -173,9 +173,9 @@ const updateColumns = (exams) => {
   })
 
   const length = tableData.value.columns.length;
-  for (let i = length - 1; tableData.value.columns[i-1].key.toLowerCase().includes('exam') ||
-   tableData.value.columns[i-1].key.toLowerCase().includes('practical') ||
-   tableData.value.columns[i-1].key.toLowerCase().includes('oral'); i--) {
+  for (let i = length - 1; tableData.value.columns[i-1].key.toLowerCase().includes('theory exam') ||
+   tableData.value.columns[i-1].key.toLowerCase().includes('practical exam') ||
+   tableData.value.columns[i-1].key.toLowerCase().includes('oral exam'); i--) {
     [tableData.value.columns[i], tableData.value.columns[i - 1]] = [tableData.value.columns[i - 1], tableData.value.columns[i]]
   }
 
@@ -186,16 +186,25 @@ const updateColumns = (exams) => {
 }
 
 const calculateDPAndFinalMark = (examData, tests, assignments, dp, final_mark) => {
+  const noPracticalsOrOrals = ["Occupational Communication I", "Occupational Communication II"]
+  const noOralExams = ["Computer Literacy"]
+
 	      if (examData && examData.custom_assessment_type == 'Exam') {
+          if (noSemesterAssessments.some(assessment => assessment.includes(examData.course))) {
+
+          }
 	        final_mark += (dp / 100.0 * 50.0) + (parseFloat(examData.total_score) / parseFloat(examData.maximum_score) * 50.0)
 	      }
 	      else if (examData && examData.custom_assessment_type == 'Test') {
           tests++
-	        dp += parseFloat(examData.total_score) / parseFloat(examData.maximum_score) * 30.0 
+	        dp += parseFloat(examData.total_score) / parseFloat(examData.maximum_score) * 30.0 * 0.5
         }
 	      else if (examData && examData.custom_assessment_type == 'Assignment') {
 	        assignments++
-          dp += parseFloat(examData.total_score) / parseFloat(examData.maximum_score) * 20.0
+          dp += parseFloat(examData.total_score) / parseFloat(examData.maximum_score) * 20.0 * 0.5
+        }
+        else if (examData && examData.custom_assessment_type == 'Practical Test') {
+          dp += parseFloat(examData.total_score) / parseFloat(examData.maximum_score) * 50.0
         }
         
         return { dp, final_mark, tests, assignments }

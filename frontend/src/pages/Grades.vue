@@ -133,6 +133,7 @@ const grades = createListResource({
 		let conductedExams = groupBy(response, (row) => row.assessment_group)
 		let exams = Object.keys(conductedExams)
 
+		// Sort exams to ensure theory, practical, and oral exams are at the end of the columns
 		exams.sort((a, b) => {
 			const hasA = a.includes('Exam')
 			const hasB = b.includes('Exam')
@@ -218,6 +219,9 @@ const updateColumns = (exams) => {
 	})
 }
 
+/***
+ * Calculates the DP and Final Mark for a given exam data and updates the respective variables accordingly.
+ */
 const calculateDPAndFinalMark = (
 	examData,
 	tests,
@@ -242,10 +246,17 @@ const calculateDPAndFinalMark = (
 	if (examData && examData.custom_assessment_type == 'Exam') {
 		number_of_exams++
 		if (noPracOrOralExam.some((assessment) => examData.course.includes(assessment))) {
+			/*
+        For courses with no practical or oral exams, the final mark is calculated based on the theory exam alone, 
+        which contributes 50% to the final mark.
+        The number_of_exams is set to 3 to ensure that the DP contribution is added to the final mark.
+       */
 			number_of_exams = 3
 			final_mark +=
 				(parseFloat(examData.total_score) / parseFloat(examData.maximum_score)) * 50.0
 		} else if (noOralExam.some((assessment) => examData.course.includes(assessment))) {
+			// When Courses have no oral exam theory exams contribute 40% and practical contributes 60% to the exam mark
+			// The final mark is calculated based on the contributions of the theory and practical exams, which together contribute 50% to the final mark.
 			if (examData.assessment_group.toLowerCase().includes('theory exam')) {
 				final_mark +=
 					(parseFloat(examData.total_score) / parseFloat(examData.maximum_score)) *
@@ -259,6 +270,8 @@ const calculateDPAndFinalMark = (
 					0.5
 			}
 		} else {
+			// For courses with all three exams, the final mark is calculated based on the contributions of the
+			// theory, practical, and oral exams, which together contribute 50% to the final mark.
 			if (examData.assessment_group.toLowerCase().includes('theory exam')) {
 				final_mark +=
 					(parseFloat(examData.total_score) / parseFloat(examData.maximum_score)) *
@@ -276,10 +289,18 @@ const calculateDPAndFinalMark = (
 					0.5
 			}
 		}
+		// Add DP contribution if all exams are conducted.
+		// DP contributes 50% to the final mark.
 		if (number_of_exams == 3) {
 			final_mark += dp * 0.5
 		}
 	} else if (examData && examData.custom_assessment_type == 'Test') {
+		/*
+     Practical tests account for 50% of the dp for modules with a practical test, written tests and assignments are
+     multiplied by 0.5 to account for their contribution to the DP when a practical test is present. 
+     practical_tests is set to 1 to ensure the results are displayed for modules without a practical test.
+     For modules without a practical test, written tests and assignments contribute fully to the DP. 
+     */
 		tests++
 		if (noPracTest.some((assessment) => examData.course.includes(assessment))) {
 			practical_tests = 1

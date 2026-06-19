@@ -109,9 +109,7 @@ const grades = createListResource({
 	filters: {
 		student: studentInfo.name,
 		program: currentProgram.program,
-		docstatus: '1',
-		// student:"EDU-STU-2023-00005",
-		// program:"Comp Science"
+		docstatus: ['!=', '2'],
 	},
 	transform: () => {},
 
@@ -148,7 +146,6 @@ const grades = createListResource({
 		Object.keys(courses).forEach((course) => {
 			let row = {}
 			row.course = course
-			//row.batch = courses[course][0].student_group
 			let dp = 0.0
 			let final_mark = 0.0
 			let assignments = 0
@@ -157,9 +154,6 @@ const grades = createListResource({
 			let number_of_exams = 0
 			exams.forEach((exam) => {
 				let examData = conductedExams[exam].find((row) => row.course === course)
-				row[exam] = examData
-					? `${+((parseFloat(examData.total_score) / parseFloat(examData.maximum_score)) * 100.0).toFixed(2)}%`
-					: '-'
 				;({ dp, final_mark, tests, assignments, practical_tests, number_of_exams } =
 					calculateDPAndFinalMark(
 						examData,
@@ -188,31 +182,10 @@ const grades = createListResource({
 })
 
 const updateColumns = (exams) => {
-	exams.forEach((exam) => {
-		let col = {}
-		col.label = exam
-		col.key = exam
-		tableData.value.columns.push(col)
-	})
 	tableData.value.columns.push({
 		label: 'DP',
 		key: 'dp',
 	})
-
-	const length = tableData.value.columns.length
-	for (
-		let i = length - 1;
-		tableData.value.columns[i - 1].key.toLowerCase().includes('theory exam') ||
-		tableData.value.columns[i - 1].key.toLowerCase().includes('practical exam') ||
-		tableData.value.columns[i - 1].key.toLowerCase().includes('oral exam');
-		i--
-	) {
-		;[tableData.value.columns[i], tableData.value.columns[i - 1]] = [
-			tableData.value.columns[i - 1],
-			tableData.value.columns[i],
-		]
-	}
-
 	tableData.value.columns.push({
 		label: 'Final Mark',
 		key: 'final_mark',
@@ -240,10 +213,10 @@ const calculateDPAndFinalMark = (
 		'ANH3507',
 		'ANH3506',
 	]
-	const noPracTest = ['OCAH1101', 'ANH2305', 'AEC2301', 'ANH3503', 'ANH2404']
+	const noPracTest = ['OCAH1101', 'ANH2305', 'AEC2301', 'ANH3507', 'ANH2404']
 	const noOralExam = ['CLT1101']
 
-	if (examData && examData.custom_assessment_type == 'Exam') {
+	if (examData && examData.assessment_group.toLowerCase().includes('exam')) {
 		number_of_exams++
 		if (noPracOrOralExam.some((assessment) => examData.course.includes(assessment))) {
 			/*
@@ -294,7 +267,11 @@ const calculateDPAndFinalMark = (
 		if (number_of_exams == 3) {
 			final_mark += dp * 0.5
 		}
-	} else if (examData && examData.custom_assessment_type == 'Test') {
+	} else if (
+		examData &&
+		examData.assessment_group.toLowerCase().includes('test') &&
+		!examData.assessment_group.toLowerCase().includes('practical test')
+	) {
 		/*
      Practical tests account for 50% of the dp for modules with a practical test, written tests and assignments are
      multiplied by 0.5 to account for their contribution to the DP when a practical test is present. 
@@ -304,15 +281,14 @@ const calculateDPAndFinalMark = (
 		tests++
 		if (noPracTest.some((assessment) => examData.course.includes(assessment))) {
 			practical_tests = 1
-			final_mark +=
-				(parseFloat(examData.total_score) / parseFloat(examData.maximum_score)) * 30
+			dp += (parseFloat(examData.total_score) / parseFloat(examData.maximum_score)) * 30
 		} else {
 			dp +=
 				(parseFloat(examData.total_score) / parseFloat(examData.maximum_score)) *
 				30.0 *
 				0.5
 		}
-	} else if (examData && examData.custom_assessment_type == 'Assignment') {
+	} else if (examData && examData.assessment_group.toLowerCase().includes('assignment')) {
 		assignments++
 		if (noPracTest.some((assessment) => examData.course.includes(assessment))) {
 			practical_tests = 1
@@ -323,7 +299,7 @@ const calculateDPAndFinalMark = (
 				20.0 *
 				0.5
 		}
-	} else if (examData && examData.custom_assessment_type == 'Practical Test') {
+	} else if (examData && examData.assessment_group.toLowerCase().includes('practical test')) {
 		practical_tests++
 		if (noPracTest.some((assessment) => examData.course.includes(assessment))) {
 			practical_tests = 1

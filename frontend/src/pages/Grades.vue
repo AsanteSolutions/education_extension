@@ -94,6 +94,30 @@ const student_programs = createResource({
 	auto: true,
 })
 
+const student_remarks = []
+
+const remarks = createListResource({
+	doctype: 'Academic Remark',
+	fields: ['name', 'student', 'remark', 'course', 'academic_year', 'academic_term'],
+	filters: {
+		student: studentInfo.name,
+		docstatus: ['!=', '2'],
+	},
+	auto: true,
+	onSuccess: (response) => {
+		response.forEach((remark) => {
+			student_remarks.push({
+				name: remark.name,
+				student: remark.student,
+				remark: remark.remark,
+				course: remark.course,
+				academic_year: remark.academic_year,
+				academic_term: remark.academic_term,
+			})
+		})
+	},
+})
+
 const grades = createListResource({
 	doctype: 'Assessment Result',
 	fields: [
@@ -105,12 +129,15 @@ const grades = createListResource({
 		'maximum_score',
 		'grade',
 		'custom_assessment_type',
+		'academic_year',
+		'academic_term',
 	],
 	filters: {
 		student: studentInfo.name,
 		program: currentProgram.program,
 		docstatus: ['!=', '2'],
 	},
+	pageLength: 256,
 	transform: () => {},
 
 	onSuccess: (response) => {
@@ -164,16 +191,23 @@ const grades = createListResource({
 						practical_tests,
 						number_of_exams,
 					))
+				row.remark =
+					student_remarks.find(
+						(r) =>
+							r.course === course &&
+							r.academic_year === examData.academic_year &&
+							r.academic_term === examData.academic_term,
+					)?.remark || '-'
 			})
 			row.dp =
 				assignments == numberOfAssignments &&
 				tests == numberOfTests &&
 				practical_tests == numberofPracticalTests
-					? `${+dp.toFixed(2)}%`
+					? `${Math.round(dp)}%`
 					: '-'
 			row.final_mark =
 				row.dp !== '-' && number_of_exams == numberOfExams
-					? `${+final_mark.toFixed(2)}%`
+					? `${Math.round(final_mark)}%`
 					: '-'
 			tableData.value.rows.push(row)
 		})
@@ -189,6 +223,10 @@ const updateColumns = (exams) => {
 	tableData.value.columns.push({
 		label: 'Final Mark',
 		key: 'final_mark',
+	})
+	tableData.value.columns.push({
+		label: 'Remark',
+		key: 'remark',
 	})
 }
 

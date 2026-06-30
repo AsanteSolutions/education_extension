@@ -251,7 +251,7 @@ const calculateDPAndFinalMark = (
 		'ANH3507',
 		'ANH3506',
 	]
-	const noPracTest = ['OCAH1101', 'ANH2305', 'AEC2301', 'ANH3507', 'ANH2404']
+	const noPracTest = ['OCAH1101', 'ANH2305', 'AEC2301', 'AEC2302', 'ANH3507', 'ANH2404']
 	const noOralExam = ['CLT1101']
 
 	if (examData && examData.assessment_group.toLowerCase().includes('exam')) {

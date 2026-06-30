@@ -1,6 +1,14 @@
 <template lang="">
 	<!-- <div v-if="grades.data?.length > 0">-->
 	<div>
+		<!--Banner to remove-->
+		<div
+			class="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-800"
+		>
+			<FeatherIcon name="info" class="h-4 w-4 shrink-0" />
+			<span>For those taking Occupational Communication I results are still pending.</span>
+		</div>
+		<!--Banner to remove-->
 		<div class="px-5 py-4">
 			<Dropdown class="mb-4" :options="allPrograms">
 				<template #default="{ open }">

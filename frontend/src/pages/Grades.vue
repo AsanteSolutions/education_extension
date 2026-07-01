@@ -102,7 +102,11 @@ const student_programs = createResource({
 	auto: true,
 })
 
-const student_remarks = []
+let student_remarks = []
+
+// The latest Assessment Result response, kept so the table can be rebuilt once
+// the remarks arrive (the two resources load independently and either may win).
+let latestGrades = null
 
 const remarks = createListResource({
 	doctype: 'Academic Remark',
@@ -113,16 +117,18 @@ const remarks = createListResource({
 	},
 	auto: true,
 	onSuccess: (response) => {
-		response.forEach((remark) => {
-			student_remarks.push({
-				name: remark.name,
-				student: remark.student,
-				remark: remark.remark,
-				course: remark.course,
-				academic_year: remark.academic_year,
-				academic_term: remark.academic_term,
-			})
-		})
+		// Rebuild from scratch so reloads don't accumulate duplicate remarks.
+		student_remarks = response.map((remark) => ({
+			name: remark.name,
+			student: remark.student,
+			remark: remark.remark,
+			course: remark.course,
+			academic_year: remark.academic_year,
+			academic_term: remark.academic_term,
+		}))
+		// Remarks may have arrived after the grades were already rendered with
+		// '-' placeholders — rebuild the table now that we have them.
+		buildTable()
 	},
 })
 
@@ -149,16 +155,30 @@ const grades = createListResource({
 	transform: () => {},
 
 	onSuccess: (response) => {
-		// Clear previous data
-		tableData.value.rows = []
-		tableData.value.columns = [
-			{
-				label: 'Course',
-				key: 'course',
-			},
-		]
+		latestGrades = response
+		buildTable()
+	},
+	auto: true,
+})
 
-		const numberOfAssignments = 2
+// Builds the grades table from the latest Assessment Result response and the
+// currently-loaded remarks. Safe to call from either resource's onSuccess: it
+// re-runs whenever grades or remarks arrive, resolving the load-order race that
+// previously left remarks showing '-' until the next visit.
+const buildTable = () => {
+	const response = latestGrades
+	if (!response) return
+
+	// Clear previous data
+	tableData.value.rows = []
+	tableData.value.columns = [
+		{
+			label: 'Course',
+			key: 'course',
+		},
+	]
+
+	const numberOfAssignments = 2
 		const numberOfTests = 2
 		const numberofPracticalTests = 1
 		const numberOfExams = 3
@@ -224,9 +244,7 @@ const grades = createListResource({
 					: '-'
 			tableData.value.rows.push(row)
 		})
-	},
-	auto: true,
-})
+}
 
 const updateColumns = (exams) => {
 	tableData.value.columns.push({

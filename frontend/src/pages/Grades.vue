@@ -203,7 +203,9 @@ const grades = createListResource({
 					student_remarks.find(
 						(r) =>
 							r.course === course &&
+							examData.academic_year &&
 							r.academic_year === examData.academic_year &&
+							examData.academic_term &&
 							r.academic_term === examData.academic_term,
 					)?.remark || '-'
 			})

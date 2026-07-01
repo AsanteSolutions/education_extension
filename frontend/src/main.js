@@ -30,6 +30,12 @@ app.component('Button', Button)
 app.component('Card', Card)
 app.component('Input', Input)
 
-router.isReady().then(() => {
-  app.mount('#app')
-})
+// Mount regardless of whether the initial navigation resolved. If the first
+// route's lazy chunk fails to load (e.g. a stale index.html after a deploy),
+// router.onError triggers a one-time reload; without this .catch/.finally the
+// app would never mount and the user would be stuck on a blank page.
+router.isReady()
+  .catch(() => {})
+  .finally(() => {
+    app.mount('#app')
+  })

@@ -36,20 +36,47 @@ let router = createRouter({
   routes,
 })
 
+// After a deploy the built chunks get new hashed names and the old files are
+// removed. A returning user with a cached index.html then requests a chunk that
+// 404s, so the lazy import() rejects and the page goes blank. Recover by
+// reloading once (guarded against loops) to pull the fresh index.html + chunks.
+router.onError((error) => {
+  const isChunkError =
+    /dynamically imported module|Loading chunk|Importing a module script failed|Failed to fetch/i.test(
+      error?.message || '',
+    )
+  if (isChunkError && !sessionStorage.getItem('chunk-reloaded')) {
+    sessionStorage.setItem('chunk-reloaded', '1')
+    window.location.reload()
+  }
+})
+
+// Clear the reload guard once a navigation succeeds so future chunk errors can
+// recover again.
+router.afterEach(() => {
+  sessionStorage.removeItem('chunk-reloaded')
+})
+
 router.beforeEach(async (to, from) => {
-  const { isLoggedIn, user: sessionUser } = sessionStore()
+  const { isLoggedIn } = sessionStore()
   const { user } = usersStore()
   const { student } = studentStore()
 
   if (!isLoggedIn) {
     window.location.href = '/login'
-    return await next(false)
+    return false
   }
 
-  if (user.data.length === 0) {
-    await user.reload()
+  // Don't let a failed data fetch reject the navigation — that would leave the
+  // app unmounted (blank page). Let the route render and surface errors in-page.
+  try {
+    if (user.data.length === 0) {
+      await user.reload()
+    }
+    await student.reload()
+  } catch (e) {
+    console.error('Failed to load user/student data', e)
   }
-  await student.reload()
 })
 
 export default router

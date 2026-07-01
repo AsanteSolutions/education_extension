@@ -181,6 +181,7 @@ const grades = createListResource({
 		Object.keys(courses).forEach((course) => {
 			let row = {}
 			row.course = course
+			row.remark = '-'
 			let dp = 0.0
 			let final_mark = 0.0
 			let assignments = 0
@@ -199,15 +200,17 @@ const grades = createListResource({
 						practical_tests,
 						number_of_exams,
 					))
-				row.remark =
-					student_remarks.find(
-						(r) =>
-							r.course === course &&
-							examData.academic_year &&
-							r.academic_year === examData.academic_year &&
-							examData.academic_term &&
-							r.academic_term === examData.academic_term,
-					)?.remark || '-'
+				if (examData) {
+					row.remark =
+						student_remarks.find(
+							(r) =>
+								r.course === course &&
+								r.academic_year === examData.academic_year &&
+								r.academic_term === examData.academic_term,
+						)?.remark ||
+						row.remark ||
+						'-'
+				}
 			})
 			row.dp =
 				assignments == numberOfAssignments &&

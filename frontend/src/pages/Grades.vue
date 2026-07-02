@@ -84,20 +84,14 @@ const student_programs = createResource({
 				label: program.program,
 				onClick: () => {
 					if (selectedProgram.value === program.program) return
-					selectedProgram.value = program.program
-					grades.update({
-						filters: {
-							student: studentInfo.name,
-							program: selectedProgram.value,
-							docstatus: '1',
-						},
-					})
-					grades.reload()
+					loadProgram(program.program)
 				},
 			})
 		})
-		selectedProgram.value = programs[programs.length - 1].label
 		allPrograms.value = programs
+		// Fetch grades for the program we actually display, so the table and the
+		// dropdown label can never disagree. Default to the latest (last) program.
+		loadProgram(programs[programs.length - 1].label)
 	},
 	auto: true,
 })
@@ -158,8 +152,24 @@ const grades = createListResource({
 		latestGrades = response
 		buildTable()
 	},
-	auto: true,
+	// Not auto: the first fetch is triggered by loadProgram() once we know which
+	// program is selected, avoiding an initial fetch for the wrong program.
+	auto: false,
 })
+
+// Selects a program: syncs the dropdown label and refetches grades for it, so
+// the displayed results always match the selection.
+const loadProgram = (program) => {
+	selectedProgram.value = program
+	grades.update({
+		filters: {
+			student: studentInfo.name,
+			program,
+			docstatus: ['!=', '2'],
+		},
+	})
+	grades.reload()
+}
 
 // Builds the grades table from the latest Assessment Result response and the
 // currently-loaded remarks. Safe to call from either resource's onSuccess: it
@@ -179,71 +189,73 @@ const buildTable = () => {
 	]
 
 	const numberOfAssignments = 2
-		const numberOfTests = 2
-		const numberofPracticalTests = 1
-		const numberOfExams = 3
+	const numberOfTests = 2
+	const numberofPracticalTests = 1
+	const numberOfExams = 3
 
-		let conductedExams = groupBy(response, (row) => row.assessment_group)
-		let exams = Object.keys(conductedExams)
+	let conductedExams = groupBy(response, (row) => row.assessment_group)
+	let exams = Object.keys(conductedExams)
 
-		// Sort exams to ensure theory, practical, and oral exams are at the end of the columns
-		exams.sort((a, b) => {
-			const hasA = a.includes('Exam')
-			const hasB = b.includes('Exam')
+	// Sort exams to ensure theory, practical, and oral exams are at the end of the columns
+	exams.sort((a, b) => {
+		const hasA = a.includes('Exam')
+		const hasB = b.includes('Exam')
 
-			if (hasA && !hasB) return 1
-			if (!hasA && hasB) return -1
-			return 0
+		if (hasA && !hasB) return 1
+		if (!hasA && hasB) return -1
+		return 0
+	})
+
+	updateColumns(exams)
+	let courses = groupBy(response, (row) => row.course)
+	Object.keys(courses).forEach((course) => {
+		let row = {}
+		// ListView keys rows by `row-key="id"`; without a unique id every
+		// row keys to `undefined`, so Vue can't diff them and the table fails
+		// to re-render when switching programs. Course code is unique per row.
+		row.id = course
+		row.course = course
+		row.remark = '-'
+		let dp = 0.0
+		let final_mark = 0.0
+		let assignments = 0
+		let tests = 0
+		let practical_tests = 0
+		let number_of_exams = 0
+		exams.forEach((exam) => {
+			let examData = conductedExams[exam].find((row) => row.course === course)
+			;({ dp, final_mark, tests, assignments, practical_tests, number_of_exams } =
+				calculateDPAndFinalMark(
+					examData,
+					tests,
+					assignments,
+					dp,
+					final_mark,
+					practical_tests,
+					number_of_exams,
+				))
+			if (examData) {
+				row.remark =
+					student_remarks.find(
+						(r) =>
+							r.course === course &&
+							r.academic_year === examData.academic_year &&
+							r.academic_term === examData.academic_term,
+					)?.remark ||
+					row.remark ||
+					'-'
+			}
 		})
-
-		updateColumns(exams)
-		let courses = groupBy(response, (row) => row.course)
-		Object.keys(courses).forEach((course) => {
-			let row = {}
-			row.course = course
-			row.remark = '-'
-			let dp = 0.0
-			let final_mark = 0.0
-			let assignments = 0
-			let tests = 0
-			let practical_tests = 0
-			let number_of_exams = 0
-			exams.forEach((exam) => {
-				let examData = conductedExams[exam].find((row) => row.course === course)
-				;({ dp, final_mark, tests, assignments, practical_tests, number_of_exams } =
-					calculateDPAndFinalMark(
-						examData,
-						tests,
-						assignments,
-						dp,
-						final_mark,
-						practical_tests,
-						number_of_exams,
-					))
-				if (examData) {
-					row.remark =
-						student_remarks.find(
-							(r) =>
-								r.course === course &&
-								r.academic_year === examData.academic_year &&
-								r.academic_term === examData.academic_term,
-						)?.remark ||
-						row.remark ||
-						'-'
-				}
-			})
-			row.dp =
-				assignments == numberOfAssignments &&
-				tests == numberOfTests &&
-				practical_tests == numberofPracticalTests
-					? `${Math.round(dp)}%`
-					: '-'
-			row.final_mark =
-				row.dp !== '-' && number_of_exams == numberOfExams
-					? `${Math.round(final_mark)}%`
-					: '-'
-			tableData.value.rows.push(row)
-		})
+		row.dp =
+			assignments == numberOfAssignments &&
+			tests == numberOfTests &&
+			practical_tests == numberofPracticalTests
+				? `${Math.round(dp)}%`
+				: '-'
+		row.final_mark =
+			row.dp !== '-' && number_of_exams == numberOfExams ? `${Math.round(final_mark)}%` : '-'
+		tableData.value.rows.push(row)
+	})
 }
 
 const updateColumns = (exams) => {

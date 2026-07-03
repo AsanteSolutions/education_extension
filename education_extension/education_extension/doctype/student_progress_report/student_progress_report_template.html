@@ -1,0 +1,386 @@
+{# Progress Report template (TARDI) – reproduces the printed progress report. Context provided by
+preview_progress_report (student_progress_report.py): doc -> the Student Progress Report
+(frappe._dict; missing keys return None) results -> { course_code: final_mark } (main exam sitting)
+courses -> iterable of course codes for `results` supplementary -> { course_code: final_mark }
+(optional) supplementary sitting. When present and non-empty the supplementary table is rendered,
+otherwise that whole section is skipped (single template, both cases). qualification ->
+qualification name (e.g. "DIPLOMA IN ANIMAL HEALTH") qualification_id-> qualification ID (e.g.
+"90911") identity_number -> student's national ID (Student.custom_id_number) year_label -> "YEAR II
+SEMESTER III", derived from the enrolled programme letterhead / add_letterhead -> printed
+letterhead block. expected_completion -> expected year of completion, derived from the highest
+enrolled semester. The student number is the Student document name (doc.student). #}
+
+<style>
+	.print-format {
+		font-size: 9pt;
+		font-family: 'Helvetica Neue', Helvetica, Arial, 'Open Sans', sans-serif;
+		-webkit-print-color-adjust: exact;
+		/* Frappe reads margin-top/bottom off .print-format to set wkhtmltopdf's
+		   page margins. Smaller top margin pulls the letterhead up (its default
+		   with no page header is 15mm). Bottom reserves space for the footnote
+		   footer (id="footer-html"); tune if it clips or floats too high. */
+		margin-top: 6mm;
+		margin-bottom: 36mm;
+	}
+
+	.pr-letterhead {
+		text-align: center;
+		margin-bottom: 10px;
+	}
+
+	/* This letterhead is a single full-width image, so its size is controlled by
+	   the image width (zoom/transform are ignored by wkhtmltopdf's WebKit).
+	   Lower the percentage to make the letterhead smaller. */
+	.pr-letterhead img {
+		width: 80% !important;
+		height: auto !important;
+	}
+
+	.pr-title {
+		text-align: center;
+		font-size: 18pt;
+		font-weight: bold;
+		letter-spacing: 1px;
+		color: #2f4f1f;
+		margin: 8px 0;
+	}
+
+	.pr-qualification {
+		text-align: center;
+		font-weight: bold;
+		text-transform: uppercase;
+		margin-bottom: 12px;
+		color: #2f4f1f;
+	}
+
+	/* border:0 on the table itself too — the print stylesheet draws a border
+	   around .print-format tables, which would otherwise box this info block. */
+	.pr-student-info,
+	.pr-student-info td,
+	.pr-student-info th {
+		border: 0 !important;
+	}
+
+	.pr-student-info {
+		width: 100%;
+		border-collapse: collapse;
+		margin-bottom: 10px;
+		table-layout: fixed;
+	}
+
+	.pr-student-info td {
+		width: 50%;
+		padding: 2px 4px;
+		vertical-align: top !important;
+		font-weight: bold;
+	}
+
+	/* Label sits inline, immediately before its value in the same cell.
+	   NB: named pr-label, not "label" — the print stylesheet's .label class adds
+	   a border box + padding that boxed the labels and broke alignment. */
+	.pr-student-info .pr-label {
+		font-weight: bold;
+		text-transform: uppercase;
+	}
+
+	.pr-section-heading {
+		font-weight: bold;
+		text-transform: uppercase;
+		margin: 14px 0 4px;
+	}
+
+	table.pr-marks {
+		width: 100%;
+		border-collapse: collapse;
+		margin-bottom: 6px;
+	}
+
+	table.pr-marks th,
+	table.pr-marks td {
+		border: 1px solid #000;
+		padding: 5px 6px !important;
+		vertical-align: top;
+		font-weight: bold;
+	}
+
+	table.pr-marks th {
+		background-color: #eee !important;
+		text-align: left;
+		text-transform: uppercase;
+	}
+
+	table.pr-marks .col-code {
+		width: 16%;
+	}
+	table.pr-marks .col-marks {
+		width: 12%;
+		text-align: center;
+	}
+	table.pr-marks .col-remarks {
+		width: 14%;
+		text-align: center;
+	}
+	table.pr-marks td.col-marks,
+	table.pr-marks td.col-remarks {
+		text-align: center;
+	}
+
+	/* Legend */
+	table.pr-legend {
+		width: 100%;
+		border-collapse: collapse;
+		margin: 14px 0;
+		font-size: 8pt;
+	}
+
+	table.pr-legend td,
+	table.pr-legend th {
+		border: 1px solid #000;
+		padding: 3px 5px !important;
+		font-weight: bold;
+	}
+
+	table.pr-legend .legend-title {
+		text-align: center;
+		font-weight: bold;
+		text-transform: uppercase;
+		background-color: #eee !important;
+		color: #2f4f1f;
+	}
+
+	table.pr-legend .code {
+		font-weight: bold;
+		white-space: nowrap;
+	}
+
+	/* Final remarks + signatures */
+	.pr-final-remarks-label {
+		font-weight: bold;
+		text-transform: uppercase;
+		color: #2f4f1f;
+		margin-top: 18px;
+	}
+
+	.pr-final-remarks-line {
+		border-bottom: 1px dotted #888;
+		height: 18px;
+		margin: 10px 0;
+	}
+
+	table.pr-signatures {
+		width: 100%;
+		margin-top: 24px;
+		border-collapse: collapse;
+	}
+
+	table.pr-signatures td {
+		width: 50%;
+		border: 0 !important;
+		vertical-align: bottom;
+		padding-right: 30px;
+	}
+
+	/* Signature image sits just above the signature line. */
+	.pr-signature-img {
+		display: block;
+		max-height: 55px;
+		max-width: 80%;
+		margin-bottom: 2px;
+	}
+
+	.pr-sign-line {
+		border-top: 1px solid #000;
+		padding-top: 4px;
+		font-weight: bold;
+		text-transform: uppercase;
+	}
+
+	/* Footer footnote lines. Frappe renders only the CHILDREN of id="footer-html"
+	   into the wkhtmltopdf footer (the wrapping div/class is dropped), so the
+	   class must be on the <p> tags themselves for the styling to apply. */
+	.pr-note-line {
+		font-size: 7pt;
+		line-height: 1.25;
+		margin: 0 0 3px;
+		font-weight: bold;
+	}
+
+	/* Short separator line above the footnotes (~quarter page width). As the
+	   first child of #footer-html it also carries the negative top margin that
+	   cancels the 15mm top padding Frappe's footer wrapper applies. */
+	.pr-note-rule {
+		width: 30%;
+		border-top: 1px solid #000;
+		/* Exactly cancels the 15mm top padding Frappe's footer wrapper adds, so
+		   the footnotes sit at the top of the reserved band. Going more negative
+		   than -15mm pulls them above the band and clips them. */
+		margin-top: -15mm;
+		margin-bottom: 4px;
+	}
+
+	.pr-note-line sup {
+		font-weight: bold;
+	}
+</style>
+
+{#- Remark derived from the final mark, per the legend bands. -#} {%- macro remark(mark,
+supp=False) -%} {%- if mark is none or mark == "-" or mark == "" -%} {#- incomplete: no remark -#}
+{%- else -%} {%- set m = mark | float -%} {%- if supp -%} {%- if m >= 50 -%}PS{%- else -%}FS{%-
+endif -%} {%- elif m >= 75 -%}PD {%- elif m >= 50 -%}P {%- elif m >= 40 -%}SUPP {%- else -%}F {%-
+endif -%} {%- endif -%} {%- endmacro -%} {%- macro marks_table(rows, supp=False) -%}
+<table class="pr-marks">
+	<thead>
+		<tr>
+			<th class="col-code">{{ _("Module Code") }}</th>
+			<th class="col-name">{{ _("Module Name") }}</th>
+			<th class="col-marks">{{ _("Marks") }}</th>
+			<th class="col-remarks">{{ _("Remarks") }}</th>
+		</tr>
+	</thead>
+	<tbody>
+		{%- for course in rows %} {#- Course is "CODE - Course Name"; split on the first " - " so
+		dashed names stay intact. -#} {%- set parts = course.split(" - ", 1) %}
+		<tr>
+			<td class="col-code">{{ parts[0] }}</td>
+			<td class="col-name">{{ (parts[1] if parts | length > 1 else "") | upper }}</td>
+			<td class="col-marks">{{ rows[course] }}</td>
+			<td class="col-remarks">{{ remark(rows[course], supp) }}</td>
+		</tr>
+		{%- endfor %}
+	</tbody>
+</table>
+{%- endmacro -%}
+
+<div class="page-break">
+	{#- Render the letterhead inline as normal flow content. Giving it id="header-html" would make
+	Frappe extract it into a repeating wkhtmltopdf page header and reserve a large top margin on
+	every page. -#} {% if letterhead and add_letterhead %}
+	<div class="pr-letterhead">{{ letterhead }}</div>
+	{% endif %}
+
+	<div class="pr-title">{{ _("Progress Report") }}</div>
+
+	<div class="pr-qualification">
+		{{ _("Qualification") }}: {{ qualification or "" }} {% if qualification_id %}<br />{{
+		_("Qualification ID") }}: {{ qualification_id }}{% endif %}
+	</div>
+
+	<table class="pr-student-info">
+		<tr>
+			<td>
+				<span class="pr-label">{{ _("Student Name") }}:</span> {{ doc.student_name | upper if
+				doc.student_name else "" }}
+			</td>
+			<td><span class="pr-label">{{ _("Student No.") }}:</span> {{ doc.student }}</td>
+		</tr>
+		<tr>
+			<td>
+				<span class="pr-label">{{ _("Identity Number") }}:</span> {{ identity_number or "" }}
+			</td>
+			<td>
+				<span class="pr-label">{{ _("Date of Issue") }}:</span> {{
+				frappe.utils.getdate(frappe.utils.nowdate()).strftime("%Y %B %d") | upper }}
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<span class="pr-label">{{ _("Expected Year of Completion") }}:</span> {{
+				expected_completion or "" }}
+			</td>
+			<td></td>
+		</tr>
+	</table>
+
+	<div class="pr-section-heading">{{ year_label or doc.academic_term or "" }}</div>
+
+	{{ marks_table(results) }} {% if supplementary %}
+	<div class="pr-section-heading">
+		{{ (year_label or doc.academic_term or "") }} {{ _("– Supplementary Exam") }}
+	</div>
+	{{ marks_table(supplementary, supp=True) }} {% endif %} {# ---------------- Legend
+	---------------- #}
+	<table class="pr-legend">
+		<tr>
+			<td class="legend-title" colspan="6">{{ _("Legend") }}</td>
+		</tr>
+		<tr>
+			<td class="code">DISC</td>
+			<td>{{ _("Discontinued") }}</td>
+			<td class="code"><sup>1</sup>FSUB</td>
+			<td>{{ _("Failed Subminimum") }}</td>
+			<td class="code">C</td>
+			<td>{{ _("Condoned (49%)") }}</td>
+		</tr>
+		<tr>
+			<td class="code"><sup>2</sup>NSM</td>
+			<td>{{ _("No Semester Marks") }}</td>
+			<td class="code">FS</td>
+			<td>{{ _("Failed Supplementary") }}</td>
+			<td class="code">P</td>
+			<td>{{ _("Passed (50-74%)") }}</td>
+		</tr>
+		<tr>
+			<td class="code">SUPP</td>
+			<td>{{ _("Supplementary") }}</td>
+			<td class="code">F</td>
+			<td>{{ _("Failed (Below 40%)") }}</td>
+			<td class="code">PD</td>
+			<td>{{ _("Passed with Distinction (75-100%)") }}</td>
+		</tr>
+		<tr>
+			<td class="code">PS</td>
+			<td>{{ _("Passed Supplementary") }}</td>
+			<td class="code">FSE</td>
+			<td>{{ _("Failed Special Exam") }}</td>
+			<td class="code">PSE</td>
+			<td>{{ _("Passed Special Exam") }}</td>
+		</tr>
+	</table>
+
+	{# ---------------- Final remarks & signatures ---------------- #}
+	<div class="pr-final-remarks-label">{{ _("Final Remarks") }}:</div>
+	<div class="pr-final-remarks-line"></div>
+	<div class="pr-final-remarks-line"></div>
+
+	<table class="pr-signatures">
+		<tr>
+			<td>
+				{% if signature_one %}<img class="pr-signature-img" src="{{ signature_one }}" />{% endif %}
+				<div class="pr-sign-line">
+					{{ signature_one_name }}<br />
+					{{ signature_one_role }}
+				</div>
+			</td>
+			<td>
+				{% if signature_two %}<img class="pr-signature-img" src="{{ signature_two }}" />{% endif %}
+				<div class="pr-sign-line">
+					{{ signature_two_name }}<br />
+					{{ signature_two_role }}
+				</div>
+			</td>
+		</tr>
+	</table>
+
+	{#- Page footer (repeats on every page): Frappe extracts id="footer-html" and passes it to
+	wkhtmltopdf. NOTE: only the CHILDREN of this element are rendered into the footer (the wrapping
+	element and its class are dropped), so styling classes must live on the child elements
+	themselves, e.g. pr-note-rule / pr-note-line. Superscripts match the 1/2 markers on FSUB/NSM in
+	the legend. Bottom-margin space is reserved via .print-format above. -#}
+	<div id="footer-html">
+		<div class="pr-note-rule"></div>
+		<p class="pr-note-line">
+			<sup>1</sup> <strong>FSUB:</strong> {{ _("Failure to achieve the subminimum marks required in
+			either a theory or practical exam, does not even qualify for a chance to take part in a
+			supplementary examination.") }}
+		</p>
+		<p class="pr-note-line">
+			<sup>2</sup> <strong>NSM:</strong> {{ _("Failure to achieve the minimum marks required to sit
+			for an examination.") }}
+		</p>
+		<p class="pr-note-line">
+			<strong>{{ _("PLEASE NOTE") }}:-</strong> {{ _("a student is excluded on academic grounds
+			when they have failed a repeating module OR when they have failed more than 50% of their
+			registered modules OR when they have exceeded the number of study years.") }}
+		</p>
+	</div>
+</div>

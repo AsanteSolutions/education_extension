@@ -15,18 +15,25 @@ expected_completion renders only if doc carries it, falling back to blank. #}
 		font-size: 9pt;
 		font-family: 'Helvetica Neue', Helvetica, Arial, 'Open Sans', sans-serif;
 		-webkit-print-color-adjust: exact;
-		/* Reserve bottom-margin space for the footnote footer (id="footer-html").
-		   Frappe reads this to set wkhtmltopdf's --margin-bottom; tune if the
-		   footer is clipped (increase) or floats too high (decrease). */
-		margin-bottom: 25mm;
+		/* Frappe reads margin-top/bottom off .print-format to set wkhtmltopdf's
+		   page margins. Smaller top margin pulls the letterhead up (its default
+		   with no page header is 15mm). Bottom reserves space for the footnote
+		   footer (id="footer-html"); tune if it clips or floats too high. */
+		margin-top: 6mm;
+		margin-bottom: 36mm;
 	}
 
 	.pr-letterhead {
+		text-align: center;
 		margin-bottom: 10px;
 	}
 
+	/* This letterhead is a single full-width image, so its size is controlled by
+	   the image width (zoom/transform are ignored by wkhtmltopdf's WebKit).
+	   Lower the percentage to make the letterhead smaller. */
 	.pr-letterhead img {
-		max-width: 100%;
+		width: 80% !important;
+		height: auto !important;
 	}
 
 	.pr-title {
@@ -43,6 +50,7 @@ expected_completion renders only if doc carries it, falling back to blank. #}
 		font-weight: bold;
 		text-transform: uppercase;
 		margin-bottom: 12px;
+		color: #2f4f1f;
 	}
 
 	/* border:0 on the table itself too — the print stylesheet draws a border
@@ -161,7 +169,7 @@ expected_completion renders only if doc carries it, falling back to blank. #}
 
 	table.pr-signatures {
 		width: 100%;
-		margin-top: 40px;
+		margin-top: 24px;
 		border-collapse: collapse;
 	}
 
@@ -170,6 +178,14 @@ expected_completion renders only if doc carries it, falling back to blank. #}
 		border: 0 !important;
 		vertical-align: bottom;
 		padding-right: 30px;
+	}
+
+	/* Signature image sits just above the signature line. */
+	.pr-signature-img {
+		display: block;
+		max-height: 55px;
+		max-width: 80%;
+		margin-bottom: 2px;
 	}
 
 	.pr-sign-line {
@@ -195,6 +211,9 @@ expected_completion renders only if doc carries it, falling back to blank. #}
 	.pr-note-rule {
 		width: 30%;
 		border-top: 1px solid #000;
+		/* Exactly cancels the 15mm top padding Frappe's footer wrapper adds, so
+		   the footnotes sit at the top of the reserved band. Going more negative
+		   than -15mm pulls them above the band and clips them. */
 		margin-top: -15mm;
 		margin-bottom: 4px;
 	}
@@ -248,15 +267,26 @@ endif -%} {%- endif -%} {%- endmacro -%} {%- macro marks_table(rows, supp=False)
 
 	<table class="pr-student-info">
 		<tr>
-			<td><span class="pr-label">{{ _("Student Name") }}:</span> {{ doc.student_name | upper if doc.student_name else "" }}</td>
+			<td>
+				<span class="pr-label">{{ _("Student Name") }}:</span> {{ doc.student_name | upper if
+				doc.student_name else "" }}
+			</td>
 			<td><span class="pr-label">{{ _("Student No.") }}:</span> {{ doc.student }}</td>
 		</tr>
 		<tr>
-			<td><span class="pr-label">{{ _("Identity Number") }}:</span> {{ identity_number or "" }}</td>
-			<td><span class="pr-label">{{ _("Date of Issue") }}:</span> {{ frappe.utils.getdate(frappe.utils.nowdate()).strftime("%Y %B %d") | upper }}</td>
+			<td>
+				<span class="pr-label">{{ _("Identity Number") }}:</span> {{ identity_number or "" }}
+			</td>
+			<td>
+				<span class="pr-label">{{ _("Date of Issue") }}:</span> {{
+				frappe.utils.getdate(frappe.utils.nowdate()).strftime("%Y %B %d") | upper }}
+			</td>
 		</tr>
 		<tr>
-			<td><span class="pr-label">{{ _("Expected Year of Completion") }}:</span> {{ doc.expected_completion or "" }}</td>
+			<td>
+				<span class="pr-label">{{ _("Expected Year of Completion") }}:</span> {{
+				doc.expected_completion or "" }}
+			</td>
 			<td></td>
 		</tr>
 	</table>
@@ -315,15 +345,17 @@ endif -%} {%- endif -%} {%- endmacro -%} {%- macro marks_table(rows, supp=False)
 	<table class="pr-signatures">
 		<tr>
 			<td>
+				{% if signature_one %}<img class="pr-signature-img" src="{{ signature_one }}" />{% endif %}
 				<div class="pr-sign-line">
-					{{ _("Miss N. Moyo") }}<br />
-					{{ _("Manager: Quality Assurance") }}
+					{{ signature_one_name }}<br />
+					{{ signature_one_role }}
 				</div>
 			</td>
 			<td>
+				{% if signature_two %}<img class="pr-signature-img" src="{{ signature_two }}" />{% endif %}
 				<div class="pr-sign-line">
-					{{ _("Dr N.T. Ndudane") }}<br />
-					{{ _("Principal: TARDI") }}
+					{{ signature_two_name }}<br />
+					{{ signature_two_role }}
 				</div>
 			</td>
 		</tr>

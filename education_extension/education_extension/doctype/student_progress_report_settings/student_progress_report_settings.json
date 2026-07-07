@@ -1,0 +1,79 @@
+{
+ "actions": [],
+ "allow_bulk_edit": 1,
+ "allow_rename": 1,
+ "creation": "2026-07-06 08:55:00.974341",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "signature_one_name",
+  "signature_one_role",
+  "signature_one",
+  "column_break_bjph",
+  "signature_two_name",
+  "signature_two_role",
+  "signature_two"
+ ],
+ "fields": [
+  {
+   "fieldname": "signature_one_name",
+   "fieldtype": "Data",
+   "label": "Signature One Name"
+  },
+  {
+   "fieldname": "signature_one_role",
+   "fieldtype": "Data",
+   "label": "Signature One Role"
+  },
+  {
+   "fieldname": "signature_one",
+   "fieldtype": "Attach",
+   "label": "Signature One"
+  },
+  {
+   "fieldname": "column_break_bjph",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "signature_two_name",
+   "fieldtype": "Data",
+   "label": "Signature Two Name"
+  },
+  {
+   "fieldname": "signature_two_role",
+   "fieldtype": "Data",
+   "label": "Signature Two Role"
+  },
+  {
+   "fieldname": "signature_two",
+   "fieldtype": "Attach",
+   "label": "Signature Two"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-07-06 09:01:26.841420",
+ "modified_by": "Administrator",
+ "module": "Education Extension",
+ "name": "Student Progress Report Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

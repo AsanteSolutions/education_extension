@@ -21,24 +21,33 @@ class StudentProgressReport(Document):
 
 @frappe.whitelist()
 def preview_progress_report(doc):
-	doc = frappe._dict(json.loads(doc))
-	results = calculate_final_results(get_results(doc))
-	courses = results.keys() if results else []
-	letterhead = get_letter_head(doc, not doc.add_letterhead)
-	html = frappe.render_template(
+    doc = frappe._dict(json.loads(doc))
+    results = calculate_final_results(get_results(doc))
+    courses = results.keys() if results else []
+    letterhead = get_letter_head(doc, not doc.add_letterhead)
+    signature_settings = frappe.get_single("Student Progress Report Settings")
+    signature_one_name = signature_settings.signature_one_name
+    signature_one_role = signature_settings.signature_one_role
+    signature_one = signature_settings.signature_one
+    signature_two_name = signature_settings.signature_two_name
+    signature_two_role = signature_settings.signature_two_role
+    signature_two = signature_settings.signature_two
+    html = frappe.render_template(
 		"education_extension/education_extension/doctype/student_progress_report/student_progress_report_template.html",
 		{"doc": doc, "results": results, "courses": courses, "letterhead": letterhead and letterhead.get("content", None),
    		"add_letterhead": doc.add_letterhead if doc.add_letterhead else False,
 		"qualification": QUALIFICATION_NAME, "qualification_id": QUALIFICATION_ID,
-		"identity_number": get_identity_number(doc), "year_label": get_year_label(doc)},
+		"identity_number": get_identity_number(doc), "year_label": get_year_label(doc),
+		"signature_one_name": signature_one_name, "signature_one_role": signature_one_role, "signature_one": signature_one,
+		"signature_two_name": signature_two_name, "signature_two_role": signature_two_role, "signature_two": signature_two},
 
 	)
 
-	final_template = frappe.render_template("frappe/www/printview.html", {"body": html, "title": "Progress Report"})
+    final_template = frappe.render_template("frappe/www/printview.html", {"body": html, "title": "Progress Report"})
 
-	frappe.response.filename = "Progress Report" + doc.student_name + ".pdf"
-	frappe.response.filecontent = get_pdf(final_template)
-	frappe.response.type = "pdf"
+    frappe.response.filename = "Progress Report" + doc.student_name + ".pdf"
+    frappe.response.filecontent = get_pdf(final_template)
+    frappe.response.type = "pdf"
 
 def get_identity_number(doc):
 	"""The student's national ID, stored on the Student as a custom field."""

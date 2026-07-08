@@ -8,7 +8,7 @@ export const studentStore = defineStore('education-student', () => {
   const studentGroups = ref([])
 
   const student = createResource({
-    url: 'education.education.api.get_student_info',
+    url: 'education_extension.education_extension.api.get_student_info',
     onSuccess(info) {
       if (!info) {
         window.location.href = '/app'

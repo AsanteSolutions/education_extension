@@ -7,8 +7,8 @@ otherwise that whole section is skipped (single template, both cases). qualifica
 qualification name (e.g. "DIPLOMA IN ANIMAL HEALTH") qualification_id-> qualification ID (e.g.
 "90911") identity_number -> student's national ID (Student.custom_id_number) year_label -> "YEAR II
 SEMESTER III", derived from the enrolled programme letterhead / add_letterhead -> printed
-letterhead block. The student number is the Student document name (doc.student).
-expected_completion renders only if doc carries it, falling back to blank. #}
+letterhead block. expected_completion -> expected year of completion, derived from the highest
+enrolled semester. The student number is the Student document name (doc.student). #}
 
 <style>
 	.print-format {
@@ -285,7 +285,7 @@ endif -%} {%- endif -%} {%- endmacro -%} {%- macro marks_table(rows, supp=False)
 		<tr>
 			<td>
 				<span class="pr-label">{{ _("Expected Year of Completion") }}:</span> {{
-				doc.expected_completion or "" }}
+				expected_completion or "" }}
 			</td>
 			<td></td>
 		</tr>

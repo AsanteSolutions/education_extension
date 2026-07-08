@@ -38,6 +38,7 @@ def preview_progress_report(doc):
    		"add_letterhead": doc.add_letterhead if doc.add_letterhead else False,
 		"qualification": QUALIFICATION_NAME, "qualification_id": QUALIFICATION_ID,
 		"identity_number": get_identity_number(doc), "year_label": get_year_label(doc),
+		"expected_completion": get_expected_completion(doc),
 		"signature_one_name": signature_one_name, "signature_one_role": signature_one_role, "signature_one": signature_one,
 		"signature_two_name": signature_two_name, "signature_two_role": signature_two_role, "signature_two": signature_two},
 
@@ -79,15 +80,11 @@ def _program_semester(program):
 	return int(match.group(1)) if match else None
 
 
-def get_year_label(doc):
-	"""Build the "YEAR II SEMESTER III" heading from the student's enrolled
-	programme. The Diploma in Animal Health is split into six per-semester
-	programmes named "Diploma in Animal Health Semester X" (X = 1..6), where the
-	year is ceil(X / 2) and X itself is the overall semester number.
-
-	A student may hold several enrolments in the same term (e.g. a second-year
-	student repeating first-year modules is enrolled in both Semester 1 and
-	Semester 2), so the label is taken from the highest semester enrolment."""
+def _highest_semester(doc):
+	"""The highest programme semester (1..6) the student is enrolled in for this
+	term. A student may hold several enrolments in the same term (e.g. a second
+	year repeating first-year modules is in both Semester 1 and Semester 2), so
+	the report uses the highest. Returns None if none can be determined."""
 	enrollments = frappe.get_all(
 		"Program Enrollment",
 		fields=["program"],
@@ -102,12 +99,48 @@ def get_year_label(doc):
 	semesters = [
 		s for s in (_program_semester(e.program) for e in enrollments) if s is not None
 	]
-	if not semesters:
+	return max(semesters) if semesters else None
+
+
+def get_year_label(doc):
+	"""Build the "YEAR II SEMESTER III" heading from the student's enrolled
+	programme. The Diploma in Animal Health is split into six per-semester
+	programmes named "Diploma in Animal Health Semester X" (X = 1..6), where the
+	year is ceil(X / 2) and X itself is the overall semester number."""
+	semester = _highest_semester(doc)
+	if semester is None:
 		return ""
 
-	semester = max(semesters)
 	year = (semester + 1) // 2
 	return "YEAR {} SEMESTER {}".format(_to_roman(year), _to_roman(semester))
+
+
+def _academic_year_start(doc):
+	"""Starting calendar year of the report's academic year, used as the base for
+	the expected-completion calculation. Prefers the Academic Year's
+	year_start_date, falls back to a 4-digit year in its name, then to today."""
+	if doc.academic_year:
+		start = frappe.db.get_value("Academic Year", doc.academic_year, "year_start_date")
+		if start:
+			return frappe.utils.getdate(start).year
+		match = re.search(r"(\d{4})", doc.academic_year)
+		if match:
+			return int(match.group(1))
+	return frappe.utils.getdate(frappe.utils.nowdate()).year
+
+
+def get_expected_completion(doc):
+	"""Expected year of completion, based on the highest enrolled semester and
+	anchored to the report's academic year: Semester 5/6 -> that year,
+	Semester 3/4 -> the next year, Semester 1/2 -> the year after that.
+	Equivalently: academic_year_start + (3 - academic_year_number), where the
+	academic year number is ceil(semester / 2)."""
+	semester = _highest_semester(doc)
+	if semester is None:
+		return ""
+
+	year = (semester + 1) // 2  # 1, 2 or 3
+	return str(_academic_year_start(doc) + (3 - year))
 
 
 def get_results(doc):

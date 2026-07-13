@@ -29,6 +29,19 @@ frappe.ui.form.on('Student Progress Report', {
 				'/api/method/education_extension.education_extension.doctype.student_progress_report.student_progress_report.preview_progress_report'
 			open_url_post(url, { doc: frm.doc }, true)
 		})
+		frappe.call({
+			method: 'frappe.client.get_value',
+			args: {
+				doctype: 'Company',
+				filters: { name: frm.doc.company },
+				fieldname: 'default_letter_head',
+			},
+			callback: function (r) {
+				if (r.message && r.message.default_letter_head) {
+					frm.set_value('letterhead', r.message.default_letter_head)
+				}
+			},
+		})
 	},
 
 	student: function (frm) {

@@ -45,7 +45,6 @@
    "options": "Academic Term"
   },
   {
-   "default": "TARDI Letterhead",
    "depends_on": "add_letterhead",
    "fieldname": "letterhead",
    "fieldtype": "Link",
@@ -64,7 +63,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-07-06 09:25:02.596403",
+ "modified": "2026-07-13 08:57:38.361405",
  "modified_by": "Administrator",
  "module": "Education Extension",
  "name": "Student Progress Report",

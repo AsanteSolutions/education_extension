@@ -19,57 +19,9 @@ QUALIFICATION_ID = "90911"
 class StudentProgressReport(Document):
 	pass
 
-def _current_user_student():
-    """The Student record linked to the logged-in user, if any."""
-    return frappe.db.get_value("Student", {"user": frappe.session.user}, "name")
-
-
-def _enforce_report_access(doc):
-    """Students may only generate their own progress report; staff (Academics
-    User / System Manager) may generate one for any student. Enforced here
-    because the endpoint is reachable from the student portal."""
-    roles = set(frappe.get_roles())
-    if roles & {"Academics User", "System Manager", "Administrator"}:
-        return
-    own = _current_user_student()
-    if not own or doc.student != own:
-        frappe.throw(
-            frappe._("You are not permitted to access this progress report."),
-            frappe.PermissionError,
-        )
-
-
-@frappe.whitelist()
-def get_progress_report_options():
-    """Academic years and terms the current user's student has enrolments for.
-    Used by the student portal dialog, since students cannot list Academic Year
-    / Academic Term directly. Returns the resolved student, the distinct years,
-    and the (year, term) pairs."""
-    student = _current_user_student()
-    filters = {"docstatus": ["!=", 2]}
-    if student:
-        filters["student"] = student
-    enrollments = frappe.get_all(
-        "Program Enrollment",
-        fields=["academic_year", "academic_term"],
-        filters=filters,
-    )
-    years = sorted({e.academic_year for e in enrollments if e.academic_year}, reverse=True)
-    seen, terms = set(), []
-    for e in enrollments:
-        if not e.academic_term:
-            continue
-        key = (e.academic_year, e.academic_term)
-        if key not in seen:
-            seen.add(key)
-            terms.append({"academic_year": e.academic_year, "academic_term": e.academic_term})
-    return {"student": student, "years": years, "terms": terms}
-
-
 @frappe.whitelist()
 def preview_progress_report(doc):
     doc = frappe._dict(json.loads(doc))
-    _enforce_report_access(doc)
     results = calculate_final_results(get_results(doc))
     courses = results.keys() if results else []
     letterhead = get_letter_head(doc, not doc.add_letterhead)

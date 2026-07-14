@@ -10,26 +10,18 @@
 		</div>
 		<!--Banner to remove-->
 		<div class="px-5 py-4">
-			<div class="mb-4 flex items-center justify-between gap-3">
-				<Dropdown :options="allPrograms">
-					<template #default="{ open }">
-						<Button :label="selectedProgram">
-							<template #suffix>
-								<FeatherIcon
-									:name="open ? 'chevron-up' : 'chevron-down'"
-									class="h-4 text-gray-600"
-								/>
-							</template>
-						</Button>
-					</template>
-				</Dropdown>
-				<Button variant="solid" @click="openReportDialog">
-					<template #prefix>
-						<FeatherIcon name="download" class="h-4 w-4" />
-					</template>
-					Progress Report
-				</Button>
-			</div>
+			<Dropdown class="mb-4" :options="allPrograms">
+				<template #default="{ open }">
+					<Button :label="selectedProgram">
+						<template #suffix>
+							<FeatherIcon
+								:name="open ? 'chevron-up' : 'chevron-down'"
+								class="h-4 text-gray-600"
+							/>
+						</template>
+					</Button>
+				</template>
+			</Dropdown>
 			<ListView
 				class="h-[250px]"
 				:columns="tableData.columns"
@@ -42,51 +34,14 @@
 				row-key="id"
 			/>
 		</div>
-
-		<Dialog v-model="showReportDialog" :options="{ title: 'Download Progress Report' }">
-			<template #body-content>
-				<div class="space-y-4">
-					<FormControl
-						type="select"
-						label="Academic Year"
-						:options="yearOptions"
-						v-model="selectedYear"
-					/>
-					<FormControl
-						type="select"
-						label="Semester"
-						:options="termOptions"
-						v-model="selectedTerm"
-					/>
-				</div>
-			</template>
-			<template #actions>
-				<Button
-					variant="solid"
-					class="w-full"
-					:disabled="!selectedYear || !selectedTerm"
-					@click="downloadReport"
-				>
-					Download
-				</Button>
-			</template>
-		</Dialog>
 	</div>
 	<!-- <div v-else>
     <MissingData message="No grades found" />
   </div> -->
 </template>
 <script setup>
-import {
-	Dropdown,
-	FeatherIcon,
-	ListView,
-	Dialog,
-	FormControl,
-	createResource,
-	createListResource,
-} from 'frappe-ui'
-import { ref, computed, watch } from 'vue'
+import { Dropdown, FeatherIcon, ListView, createResource, createListResource } from 'frappe-ui'
+import { ref } from 'vue'
 import { studentStore } from '@/stores/student'
 import { groupBy } from '@/utils'
 
@@ -99,80 +54,6 @@ let currentProgram = getCurrentProgram().value
 
 const allPrograms = ref([])
 const selectedProgram = ref('')
-
-// ----- Progress report dialog -----
-const showReportDialog = ref(false)
-const yearOptions = ref([{ label: '', value: '' }])
-const allTerms = ref([])
-const selectedYear = ref('')
-const selectedTerm = ref('')
-
-// Academic Year / Term choices for the dialog, scoped to this student's
-// enrolments. Fetched via a backend method because students can't list the
-// Academic Year / Academic Term doctypes directly. All other report fields
-// (student, letterhead, etc.) are filled automatically in downloadReport().
-const reportOptions = createResource({
-	url: 'education_extension.education_extension.doctype.student_progress_report.student_progress_report.get_progress_report_options',
-	auto: true,
-	onSuccess: (data) => {
-		yearOptions.value = [
-			{ label: '', value: '' },
-			...(data?.years || []).map((y) => ({ label: y, value: y })),
-		]
-		allTerms.value = data?.terms || []
-	},
-})
-
-// Only show terms belonging to the selected academic year.
-const termOptions = computed(() => [
-	{ label: '', value: '' },
-	...allTerms.value
-		.filter((t) => t.academic_year === selectedYear.value)
-		.map((t) => ({ label: t.academic_term, value: t.academic_term })),
-])
-
-// Clear the term when the year changes so a stale term isn't submitted.
-watch(selectedYear, () => {
-	selectedTerm.value = ''
-})
-
-const openReportDialog = () => {
-	showReportDialog.value = true
-}
-
-const downloadReport = () => {
-	if (!selectedYear.value || !selectedTerm.value) return
-	const doc = {
-		doctype: 'Student Progress Report',
-		student: studentInfo.name,
-		student_name: studentInfo.student_name || studentInfo.name,
-		academic_year: selectedYear.value,
-		academic_term: selectedTerm.value,
-		add_letterhead: 1,
-		letterhead: 'TARDI Letterhead',
-	}
-	// The endpoint streams a PDF via frappe.response, so trigger it with a form
-	// POST (opens the download in a new tab) and include the CSRF token.
-	const url =
-		'/api/method/education_extension.education_extension.doctype.student_progress_report.student_progress_report.preview_progress_report'
-	const form = document.createElement('form')
-	form.method = 'POST'
-	form.action = url
-	form.target = '_blank'
-	const addField = (name, value) => {
-		const input = document.createElement('input')
-		input.type = 'hidden'
-		input.name = name
-		input.value = value
-		form.appendChild(input)
-	}
-	addField('doc', JSON.stringify(doc))
-	addField('csrf_token', window.csrf_token)
-	document.body.appendChild(form)
-	form.submit()
-	document.body.removeChild(form)
-	showReportDialog.value = false
-}
 
 const tableData = ref({
 	columns: [

@@ -1,9 +1,10 @@
 {# Progress Report template (TARDI) – reproduces the printed progress report. Context provided by
 preview_progress_report (student_progress_report.py): doc -> the Student Progress Report
 (frappe._dict; missing keys return None) results -> { course_code: final_mark } (main exam sitting)
-courses -> iterable of course codes for `results` supplementary -> { course_code: final_mark }
-(optional) supplementary sitting. When present and non-empty the supplementary table is rendered,
-otherwise that whole section is skipped (single template, both cases). qualification ->
+courses -> iterable of course codes for `results` supplementary -> { course_code: supp_mark }
+(supplementary exam sitting; when non-empty the supplementary table is rendered, else skipped).
+supplementary_remarks -> { course_code: supp_remark } stored remarks for the supplementary table.
+qualification ->
 qualification name (e.g. "DIPLOMA IN ANIMAL HEALTH") qualification_id-> qualification ID (e.g.
 "90911") identity_number -> student's national ID (Student.custom_id_number) year_label -> "YEAR II
 SEMESTER III", derived from the enrolled programme letterhead / add_letterhead -> printed
@@ -230,11 +231,7 @@ enrolled semester. The student number is the Student document name (doc.student)
 	}
 </style>
 
-{#- Remark derived from the final mark, per the legend bands. -#} {%- macro remark(mark,
-supp=False) -%} {%- if mark is none or mark == "-" or mark == "" -%} {#- incomplete: no remark -#}
-{%- else -%} {%- set m = mark | float -%} {%- if supp -%} {%- if m >= 50 -%}PS{%- else -%}FS{%-
-endif -%} {%- elif m >= 75 -%}PD {%- elif m >= 50 -%}P {%- elif m >= 40 -%}SUPP {%- else -%}F {%-
-endif -%} {%- endif -%} {%- endmacro -%} {%- macro marks_table(rows, supp=False) -%}
+{%- macro marks_table(rows, remarks={}) -%}
 <table class="pr-marks">
 	<thead>
 		<tr>
@@ -251,7 +248,7 @@ endif -%} {%- endif -%} {%- endmacro -%} {%- macro marks_table(rows, supp=False)
 			<td class="col-code">{{ parts[0] }}</td>
 			<td class="col-name">{{ (parts[1] if parts | length > 1 else "") | upper }}</td>
 			<td class="col-marks">{{ rows[course] }}</td>
-			<td class="col-remarks">{{ remark(rows[course], supp) }}</td>
+			<td class="col-remarks">{{ remarks.get(course) or "" }}</td>
 		</tr>
 		{%- endfor %}
 	</tbody>
@@ -300,11 +297,11 @@ endif -%} {%- endif -%} {%- endmacro -%} {%- macro marks_table(rows, supp=False)
 
 	<div class="pr-section-heading">{{ year_label or doc.academic_term or "" }}</div>
 
-	{{ marks_table(results) }} {% if supplementary %}
+	{{ marks_table(results, remarks=results_remarks) }} {% if supplementary %}
 	<div class="pr-section-heading">
 		{{ (year_label or doc.academic_term or "") }} {{ _("– Supplementary Exam") }}
 	</div>
-	{{ marks_table(supplementary, supp=True) }} {% endif %} {# ---------------- Legend
+	{{ marks_table(supplementary, remarks=supplementary_remarks) }} {% endif %} {# ---------------- Legend
 	---------------- #}
 	<table class="pr-legend">
 		<tr>

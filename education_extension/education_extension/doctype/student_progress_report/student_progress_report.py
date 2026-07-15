@@ -112,7 +112,9 @@ def get_year_label(doc):
 		return ""
 
 	year = (semester + 1) // 2
-	return "YEAR {} SEMESTER {}".format(_to_roman(year), _to_roman(semester))
+	# Semester is shown per-year (I or II), not as the overall 1..6 number.
+	semester_in_year = 1 if semester % 2 else 2
+	return "YEAR {} SEMESTER {}".format(_to_roman(year), _to_roman(semester_in_year))
 
 
 def _academic_year_start(doc):

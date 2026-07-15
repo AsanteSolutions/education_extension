@@ -5,6 +5,15 @@ app_description = "Extension for the Frappe Education app"
 app_email = "apile@asantesolutions.co.za"
 app_license = "mit"
 
+# Website route rules
+# -------------------
+# Map deep links under the student portal SPA back to its shell page, so that
+# reloading a client-side route (e.g. /student-portal/schedule) serves the app
+# instead of 404ing (Frappe has no server page at the sub-path).
+website_route_rules = [
+	{"from_route": "/student-portal/<path:app_path>", "to_route": "student-portal"},
+]
+
 # Apps
 # ------------------
 

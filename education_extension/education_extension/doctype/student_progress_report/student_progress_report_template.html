@@ -188,6 +188,13 @@ enrolled semester. The student number is the Student document name (doc.student)
 		margin-bottom: 2px;
 	}
 
+	/* Reserves the same height as the image when no signature is set, so the
+	   signature line stays at a consistent position with or without an image. */
+	.pr-signature-space {
+		height: 55px;
+		margin-bottom: 2px;
+	}
+
 	.pr-sign-line {
 		border-top: 1px solid #000;
 		padding-top: 4px;
@@ -345,14 +352,14 @@ endif -%} {%- endif -%} {%- endmacro -%} {%- macro marks_table(rows, supp=False)
 	<table class="pr-signatures">
 		<tr>
 			<td>
-				{% if signature_one %}<img class="pr-signature-img" src="{{ signature_one }}" />{% endif %}
+				{% if signature_one %}<img class="pr-signature-img" src="{{ signature_one }}" />{% else %}<div class="pr-signature-space"></div>{% endif %}
 				<div class="pr-sign-line">
 					{{ signature_one_name }}<br />
 					{{ signature_one_role }}
 				</div>
 			</td>
 			<td>
-				{% if signature_two %}<img class="pr-signature-img" src="{{ signature_two }}" />{% endif %}
+				{% if signature_two %}<img class="pr-signature-img" src="{{ signature_two }}" />{% else %}<div class="pr-signature-space"></div>{% endif %}
 				<div class="pr-sign-line">
 					{{ signature_two_name }}<br />
 					{{ signature_two_role }}

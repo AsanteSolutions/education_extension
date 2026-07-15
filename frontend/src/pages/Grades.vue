@@ -126,6 +126,32 @@ const remarks = createListResource({
 	},
 })
 
+let student_supp_remarks = []
+
+// Supplementary Academic Remark mirrors Academic Remark. Most students have
+// none, so this simply yields an empty list and no supplementary columns appear.
+const supp_remarks = createListResource({
+	doctype: 'Supplementary Academic Remark',
+	// The remark column on this doctype is named `supp_remark`, not `remark`.
+	fields: ['name', 'student', 'supp_remark', 'course', 'academic_year', 'academic_term'],
+	filters: {
+		student: studentInfo.name,
+		docstatus: ['!=', '2'],
+	},
+	auto: true,
+	onSuccess: (response) => {
+		student_supp_remarks = response.map((remark) => ({
+			name: remark.name,
+			student: remark.student,
+			remark: remark.supp_remark,
+			course: remark.course,
+			academic_year: remark.academic_year,
+			academic_term: remark.academic_term,
+		}))
+		buildTable()
+	},
+})
+
 const grades = createListResource({
 	doctype: 'Assessment Result',
 	fields: [
@@ -193,7 +219,17 @@ const buildTable = () => {
 	const numberofPracticalTests = 1
 	const numberOfExams = 3
 
-	let conductedExams = groupBy(response, (row) => row.assessment_group)
+	// Supplementary Exam is a separate assessment group; keep it out of the DP /
+	// final-mark computation and surface it in its own column instead. Most
+	// students have none, so these lookups are usually empty.
+	const SUPP_GROUP = 'Supplementary Exam'
+	const suppByCourse = {}
+	response.forEach((r) => {
+		if (r.assessment_group === SUPP_GROUP) suppByCourse[r.course] = r
+	})
+	const mainRows = response.filter((r) => r.assessment_group !== SUPP_GROUP)
+
+	let conductedExams = groupBy(mainRows, (row) => row.assessment_group)
 	let exams = Object.keys(conductedExams)
 
 	// Sort exams to ensure theory, practical, and oral exams are at the end of the columns
@@ -206,8 +242,14 @@ const buildTable = () => {
 		return 0
 	})
 
-	updateColumns(exams)
-	let courses = groupBy(response, (row) => row.course)
+	let courses = groupBy(mainRows, (row) => row.course)
+
+	// Only add the supplementary columns when some course in view actually has a
+	// supplementary exam result or remark (most students have neither).
+	const suppRemarkCourses = new Set(student_supp_remarks.map((r) => r.course))
+	const hasSupp = Object.keys(courses).some((c) => suppByCourse[c] || suppRemarkCourses.has(c))
+
+	updateColumns(exams, hasSupp)
 	Object.keys(courses).forEach((course) => {
 		let row = {}
 		// ListView keys rows by `row-key="id"`; without a unique id every
@@ -222,6 +264,8 @@ const buildTable = () => {
 		let tests = 0
 		let practical_tests = 0
 		let number_of_exams = 0
+		let rowYear = null
+		let rowTerm = null
 		exams.forEach((exam) => {
 			let examData = conductedExams[exam].find((row) => row.course === course)
 			;({ dp, final_mark, tests, assignments, practical_tests, number_of_exams } =
@@ -235,6 +279,8 @@ const buildTable = () => {
 					number_of_exams,
 				))
 			if (examData) {
+				rowYear = examData.academic_year
+				rowTerm = examData.academic_term
 				row.remark =
 					student_remarks.find(
 						(r) =>
@@ -254,11 +300,26 @@ const buildTable = () => {
 				: '-'
 		row.final_mark =
 			row.dp !== '-' && number_of_exams == numberOfExams ? `${Math.round(final_mark)}%` : '-'
+
+		// Supplementary exam result (as a percentage) and supplementary remark,
+		// matched to the same course/year/term. Both fall back to '-' when absent.
+		const supp = suppByCourse[course]
+		row.supp_exam =
+			supp && parseFloat(supp.maximum_score)
+				? `${Math.round((parseFloat(supp.total_score) / parseFloat(supp.maximum_score)) * 100)}%`
+				: '-'
+		const suppYear = supp ? supp.academic_year : rowYear
+		const suppTerm = supp ? supp.academic_term : rowTerm
+		row.supp_remark =
+			student_supp_remarks.find(
+				(r) => r.course === course && r.academic_year === suppYear && r.academic_term === suppTerm,
+			)?.remark || '-'
+
 		tableData.value.rows.push(row)
 	})
 }
 
-const updateColumns = (exams) => {
+const updateColumns = (exams, hasSupp) => {
 	tableData.value.columns.push({
 		label: 'DP',
 		key: 'dp',
@@ -271,6 +332,17 @@ const updateColumns = (exams) => {
 		label: 'Remark',
 		key: 'remark',
 	})
+	// Only shown when a student actually has supplementary data.
+	if (hasSupp) {
+		tableData.value.columns.push({
+			label: 'Supp Exam',
+			key: 'supp_exam',
+		})
+		tableData.value.columns.push({
+			label: 'Supp Remark',
+			key: 'supp_remark',
+		})
+	}
 }
 
 /***

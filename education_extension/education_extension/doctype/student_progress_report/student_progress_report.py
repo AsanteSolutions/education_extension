@@ -15,6 +15,10 @@ from frappe.www.printview import get_letter_head
 QUALIFICATION_NAME = "DIPLOMA IN ANIMAL HEALTH"
 QUALIFICATION_ID = "90911"
 
+# Assessment group for the supplementary (re-sit) exam. Handled separately from
+# the regular marks, mirroring the portal Grades page.
+SUPP_GROUP = "Supplementary Exam"
+
 
 class StudentProgressReport(Document):
 	pass
@@ -24,6 +28,9 @@ def preview_progress_report(doc):
     doc = frappe._dict(json.loads(doc))
     results = calculate_final_results(get_results(doc))
     courses = results.keys() if results else []
+    results_remarks = get_academic_remarks(doc)
+    supplementary = get_supplementary_results(doc)
+    supplementary_remarks = get_supplementary_remarks(doc)
     letterhead = get_letter_head(doc, not doc.add_letterhead)
     signature_settings = frappe.get_single("Student Progress Report Settings")
     signature_one_name = signature_settings.signature_one_name
@@ -39,6 +46,8 @@ def preview_progress_report(doc):
 		"qualification": QUALIFICATION_NAME, "qualification_id": QUALIFICATION_ID,
 		"identity_number": get_identity_number(doc), "year_label": get_year_label(doc),
 		"expected_completion": get_expected_completion(doc),
+		"results_remarks": results_remarks,
+		"supplementary": supplementary, "supplementary_remarks": supplementary_remarks,
 		"signature_one_name": signature_one_name, "signature_one_role": signature_one_role, "signature_one": signature_one,
 		"signature_two_name": signature_two_name, "signature_two_role": signature_two_role, "signature_two": signature_two},
 
@@ -154,9 +163,63 @@ def get_results(doc):
 	results = frappe.get_all(
 		"Assessment Result",
 		fields=["course", "assessment_group", "total_score"],
-		filters={"student": doc.student, "academic_term": doc.academic_term, "docstatus": ['!=', 2]}
+		filters={
+			"student": doc.student,
+			"academic_term": doc.academic_term,
+			# Supplementary Exam is surfaced separately; keep it out of the DP /
+			# final-mark computation (same as the portal Grades page).
+			"assessment_group": ["!=", SUPP_GROUP],
+			"docstatus": ["!=", 2],
+		},
 	)
 	return results
+
+
+def get_supplementary_results(doc):
+	"""Supplementary exam mark per course, mirroring the portal Grades page: the
+	"Supplementary Exam" assessment group's score (treated as a percentage, like
+	the other marks here). Keyed by course; usually empty as few students supplement."""
+	rows = frappe.get_all(
+		"Assessment Result",
+		fields=["course", "total_score"],
+		filters={
+			"student": doc.student,
+			"academic_term": doc.academic_term,
+			"assessment_group": SUPP_GROUP,
+			"docstatus": ["!=", 2],
+		},
+	)
+	return {r.course: round_half_up(r.total_score) for r in rows if r.total_score is not None}
+
+
+def get_academic_remarks(doc):
+	"""Stored remark per course, from the Academic Remark doctype. Keyed by course.
+	The report shows only stored remarks (it never derives them from the mark)."""
+	rows = frappe.get_all(
+		"Academic Remark",
+		fields=["course", "remark"],
+		filters={
+			"student": doc.student,
+			"academic_term": doc.academic_term,
+			"docstatus": ["!=", 2],
+		},
+	)
+	return {r.course: r.remark for r in rows if r.remark}
+
+
+def get_supplementary_remarks(doc):
+	"""Stored supplementary remark per course, from the Supplementary Academic
+	Remark doctype (whose remark field is named `supp_remark`). Keyed by course."""
+	rows = frappe.get_all(
+		"Supplementary Academic Remark",
+		fields=["course", "supp_remark"],
+		filters={
+			"student": doc.student,
+			"academic_term": doc.academic_term,
+			"docstatus": ["!=", 2],
+		},
+	)
+	return {r.course: r.supp_remark for r in rows if r.supp_remark}
 
 def round_half_up(value):
     return str(int(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)))

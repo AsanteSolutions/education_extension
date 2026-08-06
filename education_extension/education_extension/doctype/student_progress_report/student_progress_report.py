@@ -101,7 +101,7 @@ def _highest_semester(doc):
 			"student": doc.student,
 			"academic_year": doc.academic_year,
 			"academic_term": doc.academic_term,
-			"docstatus": ["!=", 2],
+			"docstatus": 1,
 		},
 	)
 
@@ -169,7 +169,7 @@ def get_results(doc):
 			# Supplementary Exam is surfaced separately; keep it out of the DP /
 			# final-mark computation (same as the portal Grades page).
 			"assessment_group": ["!=", SUPP_GROUP],
-			"docstatus": ["!=", 2],
+			"docstatus": 1,
 		},
 	)
 	return results
@@ -186,7 +186,7 @@ def get_supplementary_results(doc):
 			"student": doc.student,
 			"academic_term": doc.academic_term,
 			"assessment_group": SUPP_GROUP,
-			"docstatus": ["!=", 2],
+			"docstatus": 1,
 		},
 	)
 	return {r.course: round_half_up(r.total_score) for r in rows if r.total_score is not None}
@@ -201,7 +201,7 @@ def get_academic_remarks(doc):
 		filters={
 			"student": doc.student,
 			"academic_term": doc.academic_term,
-			"docstatus": ["!=", 2],
+			"docstatus": 1,
 		},
 	)
 	return {r.course: r.remark for r in rows if r.remark}
@@ -216,7 +216,7 @@ def get_supplementary_remarks(doc):
 		filters={
 			"student": doc.student,
 			"academic_term": doc.academic_term,
-			"docstatus": ["!=", 2],
+			"docstatus": 1,
 		},
 	)
 	return {r.course: r.supp_remark for r in rows if r.supp_remark}

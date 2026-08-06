@@ -107,7 +107,7 @@ const remarks = createListResource({
 	fields: ['name', 'student', 'remark', 'course', 'academic_year', 'academic_term'],
 	filters: {
 		student: studentInfo.name,
-		docstatus: ['!=', '2'],
+		docstatus: '1',
 	},
 	auto: true,
 	onSuccess: (response) => {
@@ -136,7 +136,7 @@ const supp_remarks = createListResource({
 	fields: ['name', 'student', 'supp_remark', 'course', 'academic_year', 'academic_term'],
 	filters: {
 		student: studentInfo.name,
-		docstatus: ['!=', '2'],
+		docstatus: '1',
 	},
 	auto: true,
 	onSuccess: (response) => {
@@ -169,7 +169,7 @@ const grades = createListResource({
 	filters: {
 		student: studentInfo.name,
 		program: currentProgram.program,
-		docstatus: ['!=', '2'],
+		docstatus: '1',
 	},
 	pageLength: 256,
 	transform: () => {},
@@ -191,7 +191,7 @@ const loadProgram = (program) => {
 		filters: {
 			student: studentInfo.name,
 			program,
-			docstatus: ['!=', '2'],
+			docstatus: '1',
 		},
 	})
 	grades.reload()
@@ -312,7 +312,10 @@ const buildTable = () => {
 		const suppTerm = supp ? supp.academic_term : rowTerm
 		row.supp_remark =
 			student_supp_remarks.find(
-				(r) => r.course === course && r.academic_year === suppYear && r.academic_term === suppTerm,
+				(r) =>
+					r.course === course &&
+					r.academic_year === suppYear &&
+					r.academic_term === suppTerm,
 			)?.remark || '-'
 
 		tableData.value.rows.push(row)

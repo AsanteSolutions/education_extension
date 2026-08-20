@@ -19,18 +19,42 @@ QUALIFICATION_ID = "90911"
 # the regular marks, mirroring the portal Grades page.
 SUPP_GROUP = "Supplementary Exam"
 
+# Aegrotat (illness/absence) sittings are recorded by prefixing the normal exam
+# assessment group with AEGRO, e.g. "AEGRO Theory Exam". Any such result in the
+# term's marks moves the report onto the AEGROTAT issue date.
+AEGROTAT_GROUP_PREFIX = "AEGRO"
+
+# The "Issue Date For" options on Progress Report Issue Date. Standard is a normal
+# marks run; the rest apply on top of it when the report carries a supplementary
+# sitting, an aegrotat sitting, or remarked results.
+ISSUE_DATE_STANDARD = "Standard"
+ISSUE_DATE_SUPPLEMENTARY = "Supplementary"
+ISSUE_DATE_REMARKING = "Remarking"
+ISSUE_DATE_AEGROTAT = "AEGROTAT"
+
 
 class StudentProgressReport(Document):
 	pass
 
 @frappe.whitelist()
 def preview_progress_report(doc):
-    doc = frappe._dict(json.loads(doc))
+    # `doc` arrives as a JSON string from the desk form; tolerate an already-parsed
+    # dict so the endpoint also works when called with a JSON request body.
+    doc = frappe._dict(json.loads(doc) if isinstance(doc, str) else doc)
     results = calculate_final_results(get_results(doc))
     courses = results.keys() if results else []
     results_remarks = get_academic_remarks(doc)
     supplementary = get_supplementary_results(doc)
     supplementary_remarks = get_supplementary_remarks(doc)
+    # Modules are printed one table per programme semester, ascending; the
+    # course -> semester lookup is shared by both sittings.
+    course_semesters = get_course_semesters(doc)
+    result_groups = group_by_semester(results, doc, course_semesters)
+    supplementary_groups = group_by_semester(supplementary, doc, course_semesters)
+    issue_date = get_issue_date(doc, supplementary, supplementary_remarks)
+    # Footer stamp: when this PDF was generated, as opposed to when the marks were
+    # issued.
+    print_date = frappe.utils.getdate(frappe.utils.nowdate())
     letterhead = get_letter_head(doc, not doc.add_letterhead)
     signature_settings = frappe.get_single("Student Progress Report Settings")
     signature_one_name = signature_settings.signature_one_name
@@ -45,9 +69,11 @@ def preview_progress_report(doc):
    		"add_letterhead": doc.add_letterhead if doc.add_letterhead else False,
 		"qualification": QUALIFICATION_NAME, "qualification_id": QUALIFICATION_ID,
 		"identity_number": get_identity_number(doc), "year_label": get_year_label(doc),
+		"issue_date": issue_date, "print_date": print_date,
 		"expected_completion": get_expected_completion(doc),
-		"results_remarks": results_remarks,
+		"results_remarks": results_remarks, "result_groups": result_groups,
 		"supplementary": supplementary, "supplementary_remarks": supplementary_remarks,
+		"supplementary_groups": supplementary_groups,
 		"signature_one_name": signature_one_name, "signature_one_role": signature_one_role, "signature_one": signature_one,
 		"signature_two_name": signature_two_name, "signature_two_role": signature_two_role, "signature_two": signature_two},
 
@@ -55,7 +81,11 @@ def preview_progress_report(doc):
 
     final_template = frappe.render_template("frappe/www/printview.html", {"body": html, "title": "Progress Report"})
 
-    frappe.response.filename = "Progress Report" + doc.student_name + ".pdf"
+    # Streamed straight back as PDF bytes; the desk form fetches this as a blob and
+    # saves it under the filename set here.
+    frappe.response.filename = "Progress Report - {}.pdf".format(
+        doc.student_name or doc.student or ""
+    )
     frappe.response.filecontent = get_pdf(final_template)
     frappe.response.type = "pdf"
 
@@ -111,19 +141,100 @@ def _highest_semester(doc):
 	return max(semesters) if semesters else None
 
 
+def _semester_label(semester):
+	"""Heading for an overall semester number (1..6), e.g. 4 -> "YEAR II SEMESTER
+	II": the year is ceil(semester / 2) and the semester is shown per-year (I or
+	II), not as the overall number."""
+	year = (semester + 1) // 2
+	semester_in_year = 1 if semester % 2 else 2
+	return "YEAR {} SEMESTER {}".format(_to_roman(year), _to_roman(semester_in_year))
+
+
 def get_year_label(doc):
 	"""Build the "YEAR II SEMESTER III" heading from the student's enrolled
 	programme. The Diploma in Animal Health is split into six per-semester
-	programmes named "Diploma in Animal Health Semester X" (X = 1..6), where the
-	year is ceil(X / 2) and X itself is the overall semester number."""
+	programmes named "Diploma in Animal Health Semester X" (X = 1..6)."""
 	semester = _highest_semester(doc)
 	if semester is None:
 		return ""
+	return _semester_label(semester)
 
-	year = (semester + 1) // 2
-	# Semester is shown per-year (I or II), not as the overall 1..6 number.
-	semester_in_year = 1 if semester % 2 else 2
-	return "YEAR {} SEMESTER {}".format(_to_roman(year), _to_roman(semester_in_year))
+
+def get_course_semesters(doc):
+	"""Map each course to the programme semester (1..6) it belongs to, so the
+	report can print one marks table per semester. The curriculum (Program Course
+	on each "... Semester X" programme) provides the base mapping; the student's
+	own enrolments for this term override it, which is what places a repeated
+	module under the semester it is actually being repeated in."""
+	semesters = {}
+
+	for row in frappe.get_all(
+		"Program Course",
+		fields=["course", "parent"],
+		filters={"parenttype": "Program"},
+	):
+		semester = _program_semester(row.parent)
+		if semester is None:
+			continue
+		# A module listed by several programmes is attributed to the earliest.
+		current = semesters.get(row.course)
+		if current is None or semester < current:
+			semesters[row.course] = semester
+
+	enrollments = frappe.get_all(
+		"Program Enrollment",
+		fields=["name", "program"],
+		filters={
+			"student": doc.student,
+			"academic_year": doc.academic_year,
+			"academic_term": doc.academic_term,
+			"docstatus": 1,
+		},
+	)
+	enrollment_semester = {e.name: _program_semester(e.program) for e in enrollments}
+	if enrollment_semester:
+		for row in frappe.get_all(
+			"Program Enrollment Course",
+			fields=["course", "parent"],
+			filters={
+				"parent": ["in", list(enrollment_semester)],
+				"parenttype": "Program Enrollment",
+			},
+		):
+			semester = enrollment_semester.get(row.parent)
+			if semester is not None:
+				semesters[row.course] = semester
+
+	return semesters
+
+
+def group_by_semester(rows, doc, course_semesters=None):
+	"""Split a { course: mark } dict into one group per programme semester, in
+	ascending semester order, as [{"semester", "label", "rows"}]. Courses within a
+	group are sorted by code. Courses whose semester cannot be determined are
+	collected into a final group headed by the report's own year/term label."""
+	if not rows:
+		return []
+
+	if course_semesters is None:
+		course_semesters = get_course_semesters(doc)
+
+	grouped = defaultdict(dict)
+	for course in sorted(rows):
+		grouped[course_semesters.get(course)][course] = rows[course]
+
+	# Only the unknown-semester group needs the report-wide heading, and resolving
+	# it costs a query, so look it up only when there is such a group.
+	fallback_label = (get_year_label(doc) or doc.academic_term or "") if None in grouped else ""
+	# `None` (unknown semester) sorts after the numbered semesters.
+	return [
+		{
+			"semester": semester,
+			"label": _semester_label(semester) if semester is not None else fallback_label,
+			"rows": grouped[semester],
+		}
+		for semester in sorted(grouped, key=lambda s: (s is None, s))
+	]
 
 
 def _academic_year_start(doc):
@@ -221,8 +332,142 @@ def get_supplementary_remarks(doc):
 	)
 	return {r.course: r.supp_remark for r in rows if r.supp_remark}
 
+
+def _has_aegrotat_result(doc):
+	"""True when the term's marks include an aegrotat (illness/absence) sitting,
+	i.e. a result in an AEGRO-prefixed exam group."""
+	return bool(
+		frappe.get_all(
+			"Assessment Result",
+			filters={
+				"student": doc.student,
+				"academic_term": doc.academic_term,
+				"assessment_group": ["like", AEGROTAT_GROUP_PREFIX + "%"],
+				"docstatus": 1,
+			},
+			limit=1,
+		)
+	)
+
+
+def _has_remarked_result(doc):
+	"""True when a result or remark for the term has been remarked. Correcting a
+	submitted document in Frappe means cancelling and amending it, so the amendment
+	(`amended_from` set) is the trace a remark leaves behind."""
+	for doctype in ("Assessment Result", "Academic Remark"):
+		if frappe.get_all(
+			doctype,
+			filters={
+				"student": doc.student,
+				"academic_term": doc.academic_term,
+				"amended_from": ["is", "set"],
+				"docstatus": 1,
+			},
+			limit=1,
+		):
+			return True
+	return False
+
+
+def _issue_date_kinds(doc, supplementary=None, supplementary_remarks=None):
+	"""The "Issue Date For" kinds this report falls under. Standard always applies
+	— the report always carries the term's normal marks — and the others are added
+	on top when the report also carries a supplementary sitting, an aegrotat
+	sitting, or results that have been remarked."""
+	kinds = [ISSUE_DATE_STANDARD]
+
+	if supplementary is None:
+		supplementary = get_supplementary_results(doc)
+	if supplementary_remarks is None:
+		supplementary_remarks = get_supplementary_remarks(doc)
+	if supplementary or supplementary_remarks:
+		kinds.append(ISSUE_DATE_SUPPLEMENTARY)
+
+	if _has_aegrotat_result(doc):
+		kinds.append(ISSUE_DATE_AEGROTAT)
+
+	if _has_remarked_result(doc):
+		kinds.append(ISSUE_DATE_REMARKING)
+
+	return kinds
+
+
+def get_issue_date(doc, supplementary=None, supplementary_remarks=None):
+	"""The date printed as the report's "Date of Issue".
+
+	Taken from the submitted Progress Report Issue Date records for the report's
+	academic year and term, limited to the kinds this report falls under (see
+	_issue_date_kinds). The latest of those is used, since the report is only
+	issued once the last of those sittings has been dealt with.
+
+	With no such record on file, it falls back to when the marks were last
+	touched: the latest modification across the student's results and remarks."""
+	kinds = _issue_date_kinds(doc, supplementary, supplementary_remarks)
+
+	rows = frappe.get_all(
+		"Progress Report Issue Date",
+		fields=["issue_date"],
+		filters={
+			"academic_year": doc.academic_year,
+			"academic_term": doc.academic_term,
+			# "" catches a record left on no kind at all, which is a Standard run.
+			"issue_date_for": ["in", kinds + [""]],
+			"docstatus": 1,
+		},
+		order_by="issue_date desc",
+		limit=1,
+	)
+	if rows and rows[0].issue_date:
+		return frappe.utils.getdate(rows[0].issue_date)
+
+	return _last_marks_change(doc) or frappe.utils.getdate(frappe.utils.nowdate())
+
+
+def _last_marks_change(doc):
+	"""When the student's marks for the term were last touched: the latest
+	`modified` across their results and remarks. None if they have neither, which
+	only happens on a report with nothing on it."""
+	latest = None
+	for doctype in ("Assessment Result", "Academic Remark", "Supplementary Academic Remark"):
+		rows = frappe.get_all(
+			doctype,
+			fields=["modified"],
+			filters={
+				"student": doc.student,
+				"academic_term": doc.academic_term,
+				"docstatus": 1,
+			},
+			order_by="modified desc",
+			limit=1,
+		)
+		if rows and rows[0].modified and (latest is None or rows[0].modified > latest):
+			latest = rows[0].modified
+
+	return frappe.utils.getdate(latest) if latest else None
+
 def round_half_up(value):
     return str(int(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)))
+
+def _assessment_field(assessment_group, group_to_field):
+	"""The score field an assessment group's mark belongs to, as (field, is_aegrotat).
+
+	An aegrotat sitting is the normal exam group prefixed with AEGRO (e.g. "AEGRO
+	Theory Exam") and stands in for the sitting it replaces, so it resolves to the
+	same field as the group it prefixes. (None, False) for a group that is not part
+	of the final mark, such as the supplementary exam."""
+	group = (assessment_group or "").strip()
+
+	field = group_to_field.get(group)
+	if field:
+		return field, False
+
+	if group.upper().startswith(AEGROTAT_GROUP_PREFIX):
+		for name, aegrotat_field in group_to_field.items():
+			if group.upper().endswith(name.upper()):
+				return aegrotat_field, True
+
+	return None, False
+
 
 def calculate_final_results(results):
     """Calculate the final mark for every course the student has assessment
@@ -260,10 +505,18 @@ def calculate_final_results(results):
         is_no_prac_test = any(c in course for c in NO_PRAC_TEST)
 
         scores = {field: None for field in group_to_field.values()}
+        aegrotat_fields = set()
         for sr in course_results:
-            field = group_to_field.get(sr["assessment_group"])
-            if field and sr["total_score"] is not None:
-                scores[field] = float(sr["total_score"])
+            field, is_aegrotat = _assessment_field(sr["assessment_group"], group_to_field)
+            if not field or sr["total_score"] is None:
+                continue
+            # An aegrotat sitting replaces the one it stands in for, so it keeps the
+            # field if both were captured.
+            if field in aegrotat_fields and not is_aegrotat:
+                continue
+            scores[field] = float(sr["total_score"])
+            if is_aegrotat:
+                aegrotat_fields.add(field)
 
         # ---- DP (continuous assessment, worth 50% of the final mark) ----
         if is_no_prac_test:

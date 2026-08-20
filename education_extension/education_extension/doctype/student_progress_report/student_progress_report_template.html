@@ -1,15 +1,20 @@
 {# Progress Report template (TARDI) – reproduces the printed progress report. Context provided by
 preview_progress_report (student_progress_report.py): doc -> the Student Progress Report
 (frappe._dict; missing keys return None) results -> { course_code: final_mark } (main exam sitting)
-courses -> iterable of course codes for `results` supplementary -> { course_code: supp_mark }
-(supplementary exam sitting; when non-empty the supplementary table is rendered, else skipped).
-supplementary_remarks -> { course_code: supp_remark } stored remarks for the supplementary table.
-qualification ->
-qualification name (e.g. "DIPLOMA IN ANIMAL HEALTH") qualification_id-> qualification ID (e.g.
-"90911") identity_number -> student's national ID (Student.custom_id_number) year_label -> "YEAR II
-SEMESTER III", derived from the enrolled programme letterhead / add_letterhead -> printed
-letterhead block. expected_completion -> expected year of completion, derived from the highest
-enrolled semester. The student number is the Student document name (doc.student). #}
+courses -> iterable of course codes for `results` result_groups -> the same marks split into one
+group per programme semester, ascending: [{label, semester, rows}], one table rendered per group.
+supplementary -> { course_code: supp_mark } (supplementary exam sitting) supplementary_groups ->
+the supplementary marks in the same per-semester grouping (empty when there are none).
+supplementary_remarks -> { course_code: supp_remark } stored remarks for the supplementary tables.
+qualification -> qualification name (e.g. "DIPLOMA IN ANIMAL HEALTH") qualification_id->
+qualification ID (e.g. "90911") identity_number -> student's national ID (Student.custom_id_number)
+year_label -> "YEAR II SEMESTER III", derived from the enrolled programme; used as the heading for
+any module whose semester cannot be resolved. issue_date -> date printed as "Date of Issue", taken
+from the Progress Report Issue Date matching this report (see get_issue_date). print_date -> date
+the PDF was generated, stamped in the page footer.
+letterhead / add_letterhead -> printed letterhead block. expected_completion -> expected year of
+completion, derived from the highest enrolled semester. The student number is the Student document
+name (doc.student). #}
 
 <style>
 	.print-format {
@@ -25,8 +30,18 @@ enrolled semester. The student number is the Student document name (doc.student)
 	}
 
 	.pr-letterhead {
-		text-align: center;
+		text-align: left;
 		margin-bottom: 10px;
+	}
+
+	/* The Letter Head doctype markup often wraps the image in its own centred
+	   div/table, so force its wrappers left too. */
+	.pr-letterhead div,
+	.pr-letterhead p,
+	.pr-letterhead table,
+	.pr-letterhead td {
+		text-align: left !important;
+		margin-left: 0 !important;
 	}
 
 	/* This letterhead is a single full-width image, so its size is controlled by
@@ -35,6 +50,8 @@ enrolled semester. The student number is the Student document name (doc.student)
 	.pr-letterhead img {
 		width: 80% !important;
 		height: auto !important;
+		margin-left: -5px !important;
+		margin-right: auto !important;
 	}
 
 	.pr-title {
@@ -226,6 +243,17 @@ enrolled semester. The student number is the Student document name (doc.student)
 		margin-bottom: 4px;
 	}
 
+	/* Date the PDF was generated, on the last line of the page footer. Same 7pt as
+	   the footnotes but set to the right so it does not read as another note. As
+	   with those, the class has to sit on the element itself (see #footer-html). */
+	.pr-print-date {
+		font-size: 7pt;
+		line-height: 1.25;
+		margin: 3px 0 0;
+		text-align: right;
+		font-weight: bold;
+	}
+
 	.pr-note-line sup {
 		font-weight: bold;
 	}
@@ -283,7 +311,7 @@ enrolled semester. The student number is the Student document name (doc.student)
 			</td>
 			<td>
 				<span class="pr-label">{{ _("Date of Issue") }}:</span> {{
-				frappe.utils.getdate(frappe.utils.nowdate()).strftime("%Y %B %d") | upper }}
+				issue_date.strftime("%Y %B %d") | upper if issue_date else "" }}
 			</td>
 		</tr>
 		<tr>
@@ -295,14 +323,15 @@ enrolled semester. The student number is the Student document name (doc.student)
 		</tr>
 	</table>
 
-	<div class="pr-section-heading">{{ year_label or doc.academic_term or "" }}</div>
-
-	{{ marks_table(results, remarks=results_remarks) }} {% if supplementary %}
-	<div class="pr-section-heading">
-		{{ (year_label or doc.academic_term or "") }} {{ _("– Supplementary Exam") }}
-	</div>
-	{{ marks_table(supplementary, remarks=supplementary_remarks) }} {% endif %} {# ---------------- Legend
-	---------------- #}
+	{#- One marks table per programme semester, ascending. Each group is {label, semester, rows}
+	built by group_by_semester(); when no semester can be resolved for a module it lands in a final
+	group labelled with the report's own year/term heading. -#} {%- for group in result_groups %}
+	<div class="pr-section-heading">{{ group.label }}</div>
+	{{ marks_table(group.rows, remarks=results_remarks) }} {%- endfor %} {%- for group in
+	supplementary_groups %}
+	<div class="pr-section-heading">{{ group.label }} {{ _("– Supplementary Exam") }}</div>
+	{{ marks_table(group.rows, remarks=supplementary_remarks) }} {%- endfor %} {# ----------------
+	Legend ---------------- #}
 	<table class="pr-legend">
 		<tr>
 			<td class="legend-title" colspan="6">{{ _("Legend") }}</td>
@@ -349,14 +378,18 @@ enrolled semester. The student number is the Student document name (doc.student)
 	<table class="pr-signatures">
 		<tr>
 			<td>
-				{% if signature_one %}<img class="pr-signature-img" src="{{ signature_one }}" />{% else %}<div class="pr-signature-space"></div>{% endif %}
+				{% if signature_one %}<img class="pr-signature-img" src="{{ signature_one }}" />{% else %}
+				<div class="pr-signature-space"></div>
+				{% endif %}
 				<div class="pr-sign-line">
 					{{ signature_one_name }}<br />
 					{{ signature_one_role }}
 				</div>
 			</td>
 			<td>
-				{% if signature_two %}<img class="pr-signature-img" src="{{ signature_two }}" />{% else %}<div class="pr-signature-space"></div>{% endif %}
+				{% if signature_two %}<img class="pr-signature-img" src="{{ signature_two }}" />{% else %}
+				<div class="pr-signature-space"></div>
+				{% endif %}
 				<div class="pr-sign-line">
 					{{ signature_two_name }}<br />
 					{{ signature_two_role }}
@@ -385,6 +418,10 @@ enrolled semester. The student number is the Student document name (doc.student)
 			<strong>{{ _("PLEASE NOTE") }}:-</strong> {{ _("a student is excluded on academic grounds
 			when they have failed a repeating module OR when they have failed more than 50% of their
 			registered modules OR when they have exceeded the number of study years.") }}
+		</p>
+		<p class="pr-print-date">
+			{{ _("Date of Printing") }}: {{ print_date.strftime("%Y %B %d") | upper if print_date else ""
+			}}
 		</p>
 	</div>
 </div>

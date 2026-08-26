@@ -10,9 +10,9 @@
 		</div>
 		<!--Banner to remove-->
 		<div class="px-5 py-4">
-			<Dropdown class="mb-4" :options="allPrograms">
+			<Dropdown class="mb-4" :options="allTerms">
 				<template #default="{ open }">
-					<Button :label="selectedProgram">
+					<Button :label="selectedTerm">
 						<template #suffix>
 							<FeatherIcon
 								:name="open ? 'chevron-up' : 'chevron-down'"
@@ -22,17 +22,18 @@
 					</Button>
 				</template>
 			</Dropdown>
-			<ListView
-				class="h-[250px]"
-				:columns="tableData.columns"
-				:rows="tableData.rows"
-				:options="{
-					selectable: false,
-					showTooltip: false,
-					onRowClick: () => {},
-				}"
-				row-key="id"
-			/>
+			<div class="grades-table">
+				<ListView
+					:columns="tableData.columns"
+					:rows="tableData.rows"
+					:options="{
+						selectable: false,
+						showTooltip: false,
+						onRowClick: () => {},
+					}"
+					row-key="id"
+				/>
+			</div>
 		</div>
 	</div>
 	<!-- <div v-else>
@@ -52,8 +53,10 @@ const { getCurrentProgram, getStudentInfo } = studentStore()
 let studentInfo = getStudentInfo().value
 let currentProgram = getCurrentProgram().value
 
-const allPrograms = ref([])
-const selectedProgram = ref('')
+//const allPrograms = ref([])
+//const selectedProgram = ref('')
+const allTerms = ref([])
+const selectedTerm = ref('')
 
 const tableData = ref({
 	columns: [
@@ -61,39 +64,28 @@ const tableData = ref({
 			label: 'Course',
 			key: 'course',
 		},
-		/*{
-      label: 'Batch',
-      key: 'batch',
-    },*/
 	],
 	rows: [],
 })
 
-const student_programs = createResource({
-	url: 'education.education.api.get_student_programs',
-	makeParams() {
-		return {
-			// student: studentInfo.value?.name
-			student: studentInfo.name,
-		}
-	},
+const getTerms = createListResource({
+	doctype: 'Academic Term',
+	fields: ['name', 'academic_year', 'term_name'],
+	auto: true,
 	onSuccess: (response) => {
-		let programs = []
-		response.forEach((program) => {
-			programs.push({
-				label: program.program,
+		let terms = []
+		response.forEach((term) => {
+			terms.push({
+				label: `${term.academic_year} (${term.term_name})`,
 				onClick: () => {
-					if (selectedProgram.value === program.program) return
-					loadProgram(program.program)
+					if (selectedTerm.value === `${term.academic_year} (${term.term_name})`) return
+					loadTerm(term.academic_year, `${term.academic_year} (${term.term_name})`)
 				},
 			})
 		})
-		allPrograms.value = programs
-		// Fetch grades for the program we actually display, so the table and the
-		// dropdown label can never disagree. Default to the latest (last) program.
-		loadProgram(programs[programs.length - 1].label)
+		allTerms.value = terms
+		loadTerm(currentProgram.academic_year, currentProgram.academic_term)
 	},
-	auto: true,
 })
 
 let student_remarks = []
@@ -168,7 +160,9 @@ const grades = createListResource({
 	],
 	filters: {
 		student: studentInfo.name,
-		program: currentProgram.program,
+		//		program: currentProgram.program,
+		academic_year: selectedTerm.value.split(' (')[0],
+		academic_term: selectedTerm.value,
 		docstatus: '1',
 	},
 	pageLength: 256,
@@ -183,14 +177,16 @@ const grades = createListResource({
 	auto: false,
 })
 
-// Selects a program: syncs the dropdown label and refetches grades for it, so
+// Selects a term: syncs the dropdown label and refetches grades for it, so
 // the displayed results always match the selection.
-const loadProgram = (program) => {
-	selectedProgram.value = program
+const loadTerm = (academic_year, academic_term) => {
+	//selectedProgram.value = program
+	selectedTerm.value = academic_term
 	grades.update({
 		filters: {
 			student: studentInfo.name,
-			program,
+			academic_year: academic_year,
+			academic_term: academic_term,
 			docstatus: '1',
 		},
 	})
@@ -468,3 +464,9 @@ const calculateDPAndFinalMark = (
 	return { dp, final_mark, tests, assignments, practical_tests, number_of_exams }
 }
 </script>
+
+<style scoped>
+.grades-table :deep(.overflow-x-auto) {
+	overflow-x: visible;
+}
+</style>

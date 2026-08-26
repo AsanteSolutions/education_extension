@@ -1,5 +1,4 @@
-<template lang="">
-	<!-- <div v-if="grades.data?.length > 0">-->
+<template>
 	<div>
 		<!--Banner to remove-->
 		<div
@@ -12,7 +11,7 @@
 		<div class="px-5 py-4">
 			<Dropdown class="mb-4" :options="allTerms">
 				<template #default="{ open }">
-					<Button :label="selectedTerm">
+					<Button :label="selectedTerm || 'Select a term'">
 						<template #suffix>
 							<FeatherIcon
 								:name="open ? 'chevron-up' : 'chevron-down'"
@@ -22,10 +21,10 @@
 					</Button>
 				</template>
 			</Dropdown>
-			<div class="grades-table">
+			<div v-if="view.state === 'table'" class="grades-table">
 				<ListView
-					:columns="tableData.columns"
-					:rows="tableData.rows"
+					:columns="tableColumns"
+					:rows="tableRows"
 					:options="{
 						selectable: false,
 						showTooltip: false,
@@ -34,116 +33,45 @@
 					row-key="id"
 				/>
 			</div>
+			<ErrorMessage v-else-if="view.state === 'error'" class="py-6" :message="loadError" />
+			<MissingData v-else :message="view.message" />
 		</div>
 	</div>
-	<!-- <div v-else>
-    <MissingData message="No grades found" />
-  </div> -->
 </template>
 <script setup>
-import { Dropdown, FeatherIcon, ListView, createResource, createListResource } from 'frappe-ui'
-import { ref } from 'vue'
+import {
+	Dropdown,
+	ErrorMessage,
+	FeatherIcon,
+	ListView,
+	createListResource,
+} from 'frappe-ui'
+import { computed, ref } from 'vue'
 import { studentStore } from '@/stores/student'
-import { groupBy } from '@/utils'
-
 import MissingData from '@/components/MissingData.vue'
+import { groupBy } from '@/utils'
+import { calculateCourseMarks, scoreRatio, SUPP_GROUP } from '@/utils/marks'
 
 const { getCurrentProgram, getStudentInfo } = studentStore()
 
-let studentInfo = getStudentInfo().value
-let currentProgram = getCurrentProgram().value
+// Held as refs, not unwrapped here: the store fills these in from its own
+// request and replaces the object when it lands, so reading `.value` once at
+// setup would pin whatever happened to be there at the time.
+const studentInfo = getStudentInfo()
+const currentProgram = getCurrentProgram()
+const student = computed(() => studentInfo.value?.name)
 
-//const allPrograms = ref([])
-//const selectedProgram = ref('')
 const allTerms = ref([])
 const selectedTerm = ref('')
 
-const tableData = ref({
-	columns: [
-		{
-			label: 'Course',
-			key: 'course',
-		},
-	],
-	rows: [],
-})
+// The raw responses. Everything the table shows is derived from these, so the
+// three requests can land in any order without a rebuild step to sequence them.
+const assessmentResults = ref([])
+const academicRemarks = ref([])
+const supplementaryRemarks = ref([])
 
-const getTerms = createListResource({
-	doctype: 'Academic Term',
-	fields: ['name', 'academic_year', 'term_name'],
-	auto: true,
-	onSuccess: (response) => {
-		let terms = []
-		response.forEach((term) => {
-			terms.push({
-				label: `${term.academic_year} (${term.term_name})`,
-				onClick: () => {
-					if (selectedTerm.value === `${term.academic_year} (${term.term_name})`) return
-					loadTerm(term.academic_year, `${term.academic_year} (${term.term_name})`)
-				},
-			})
-		})
-		allTerms.value = terms
-		loadTerm(currentProgram.academic_year, currentProgram.academic_term)
-	},
-})
-
-let student_remarks = []
-
-// The latest Assessment Result response, kept so the table can be rebuilt once
-// the remarks arrive (the two resources load independently and either may win).
-let latestGrades = null
-
-const remarks = createListResource({
-	doctype: 'Academic Remark',
-	fields: ['name', 'student', 'remark', 'course', 'academic_year', 'academic_term'],
-	filters: {
-		student: studentInfo.name,
-		docstatus: '1',
-	},
-	auto: true,
-	onSuccess: (response) => {
-		// Rebuild from scratch so reloads don't accumulate duplicate remarks.
-		student_remarks = response.map((remark) => ({
-			name: remark.name,
-			student: remark.student,
-			remark: remark.remark,
-			course: remark.course,
-			academic_year: remark.academic_year,
-			academic_term: remark.academic_term,
-		}))
-		// Remarks may have arrived after the grades were already rendered with
-		// '-' placeholders — rebuild the table now that we have them.
-		buildTable()
-	},
-})
-
-let student_supp_remarks = []
-
-// Supplementary Academic Remark mirrors Academic Remark. Most students have
-// none, so this simply yields an empty list and no supplementary columns appear.
-const supp_remarks = createListResource({
-	doctype: 'Supplementary Academic Remark',
-	// The remark column on this doctype is named `supp_remark`, not `remark`.
-	fields: ['name', 'student', 'supp_remark', 'course', 'academic_year', 'academic_term'],
-	filters: {
-		student: studentInfo.name,
-		docstatus: '1',
-	},
-	auto: true,
-	onSuccess: (response) => {
-		student_supp_remarks = response.map((remark) => ({
-			name: remark.name,
-			student: remark.student,
-			remark: remark.supp_remark,
-			course: remark.course,
-			academic_year: remark.academic_year,
-			academic_term: remark.academic_term,
-		}))
-		buildTable()
-	},
-})
-
+// None of these three fetch on their own: each is scoped to one student and one
+// term, which loadTerm supplies once both are known.
 const grades = createListResource({
 	doctype: 'Assessment Result',
 	fields: [
@@ -158,311 +86,180 @@ const grades = createListResource({
 		'academic_year',
 		'academic_term',
 	],
-	filters: {
-		student: studentInfo.name,
-		//		program: currentProgram.program,
-		academic_year: selectedTerm.value.split(' (')[0],
-		academic_term: selectedTerm.value,
-		docstatus: '1',
-	},
 	pageLength: 256,
-	transform: () => {},
-
-	onSuccess: (response) => {
-		latestGrades = response
-		buildTable()
-	},
-	// Not auto: the first fetch is triggered by loadProgram() once we know which
-	// program is selected, avoiding an initial fetch for the wrong program.
 	auto: false,
+	onSuccess: (response) => {
+		assessmentResults.value = response
+	},
 })
 
-// Selects a term: syncs the dropdown label and refetches grades for it, so
-// the displayed results always match the selection.
+const remarks = createListResource({
+	doctype: 'Academic Remark',
+	fields: ['name', 'student', 'remark', 'course', 'academic_year', 'academic_term'],
+	pageLength: 256,
+	auto: false,
+	onSuccess: (response) => {
+		academicRemarks.value = response
+	},
+})
+
+// Supplementary Academic Remark mirrors Academic Remark, except its remark
+// column is named `supp_remark`; normalising it here keeps the lookup common.
+// Most students have none, so this is usually empty and no supplementary
+// columns appear.
+const supp_remarks = createListResource({
+	doctype: 'Supplementary Academic Remark',
+	fields: ['name', 'student', 'supp_remark', 'course', 'academic_year', 'academic_term'],
+	pageLength: 256,
+	auto: false,
+	onSuccess: (response) => {
+		supplementaryRemarks.value = response.map((r) => ({ ...r, remark: r.supp_remark }))
+	},
+})
+
+// Selects a term and refetches everything scoped to it, so what is on screen
+// always matches the selection.
 const loadTerm = (academic_year, academic_term) => {
-	//selectedProgram.value = program
 	selectedTerm.value = academic_term
-	grades.update({
-		filters: {
-			student: studentInfo.name,
-			academic_year: academic_year,
-			academic_term: academic_term,
-			docstatus: '1',
-		},
-	})
-	grades.reload()
-}
+	if (!student.value) return
 
-// Builds the grades table from the latest Assessment Result response and the
-// currently-loaded remarks. Safe to call from either resource's onSuccess: it
-// re-runs whenever grades or remarks arrive, resolving the load-order race that
-// previously left remarks showing '-' until the next visit.
-const buildTable = () => {
-	const response = latestGrades
-	if (!response) return
-
-	// Clear previous data
-	tableData.value.rows = []
-	tableData.value.columns = [
-		{
-			label: 'Course',
-			key: 'course',
-		},
-	]
-
-	const numberOfAssignments = 2
-	const numberOfTests = 2
-	const numberofPracticalTests = 1
-	const numberOfExams = 3
-
-	// Supplementary Exam is a separate assessment group; keep it out of the DP /
-	// final-mark computation and surface it in its own column instead. Most
-	// students have none, so these lookups are usually empty.
-	const SUPP_GROUP = 'Supplementary Exam'
-	const suppByCourse = {}
-	response.forEach((r) => {
-		if (r.assessment_group === SUPP_GROUP) suppByCourse[r.course] = r
-	})
-	const mainRows = response.filter((r) => r.assessment_group !== SUPP_GROUP)
-
-	let conductedExams = groupBy(mainRows, (row) => row.assessment_group)
-	let exams = Object.keys(conductedExams)
-
-	// Sort exams to ensure theory, practical, and oral exams are at the end of the columns
-	exams.sort((a, b) => {
-		const hasA = a.includes('Exam')
-		const hasB = b.includes('Exam')
-
-		if (hasA && !hasB) return 1
-		if (!hasA && hasB) return -1
-		return 0
-	})
-
-	let courses = groupBy(mainRows, (row) => row.course)
-
-	// Only add the supplementary columns when some course in view actually has a
-	// supplementary exam result or remark (most students have neither).
-	const suppRemarkCourses = new Set(student_supp_remarks.map((r) => r.course))
-	const hasSupp = Object.keys(courses).some((c) => suppByCourse[c] || suppRemarkCourses.has(c))
-
-	updateColumns(exams, hasSupp)
-	Object.keys(courses).forEach((course) => {
-		let row = {}
-		// ListView keys rows by `row-key="id"`; without a unique id every
-		// row keys to `undefined`, so Vue can't diff them and the table fails
-		// to re-render when switching programs. Course code is unique per row.
-		row.id = course
-		row.course = course
-		row.remark = '-'
-		let dp = 0.0
-		let final_mark = 0.0
-		let assignments = 0
-		let tests = 0
-		let practical_tests = 0
-		let number_of_exams = 0
-		let rowYear = null
-		let rowTerm = null
-		exams.forEach((exam) => {
-			let examData = conductedExams[exam].find((row) => row.course === course)
-			;({ dp, final_mark, tests, assignments, practical_tests, number_of_exams } =
-				calculateDPAndFinalMark(
-					examData,
-					tests,
-					assignments,
-					dp,
-					final_mark,
-					practical_tests,
-					number_of_exams,
-				))
-			if (examData) {
-				rowYear = examData.academic_year
-				rowTerm = examData.academic_term
-				row.remark =
-					student_remarks.find(
-						(r) =>
-							r.course === course &&
-							r.academic_year === examData.academic_year &&
-							r.academic_term === examData.academic_term,
-					)?.remark ||
-					row.remark ||
-					'-'
-			}
+	for (const resource of [grades, remarks, supp_remarks]) {
+		resource.update({
+			filters: {
+				student: student.value,
+				academic_year: academic_year,
+				academic_term: academic_term,
+				docstatus: '1',
+			},
 		})
-		row.dp =
-			assignments == numberOfAssignments &&
-			tests == numberOfTests &&
-			practical_tests == numberofPracticalTests
-				? `${Math.round(dp)}%`
-				: '-'
-		row.final_mark =
-			row.dp !== '-' && number_of_exams == numberOfExams ? `${Math.round(final_mark)}%` : '-'
-
-		// Supplementary exam result (as a percentage) and supplementary remark,
-		// matched to the same course/year/term. Both fall back to '-' when absent.
-		const supp = suppByCourse[course]
-		row.supp_exam =
-			supp && parseFloat(supp.maximum_score)
-				? `${Math.round((parseFloat(supp.total_score) / parseFloat(supp.maximum_score)) * 100)}%`
-				: '-'
-		const suppYear = supp ? supp.academic_year : rowYear
-		const suppTerm = supp ? supp.academic_term : rowTerm
-		row.supp_remark =
-			student_supp_remarks.find(
-				(r) =>
-					r.course === course &&
-					r.academic_year === suppYear &&
-					r.academic_term === suppTerm,
-			)?.remark || '-'
-
-		tableData.value.rows.push(row)
-	})
-}
-
-const updateColumns = (exams, hasSupp) => {
-	tableData.value.columns.push({
-		label: 'DP',
-		key: 'dp',
-	})
-	tableData.value.columns.push({
-		label: 'Final Mark',
-		key: 'final_mark',
-	})
-	tableData.value.columns.push({
-		label: 'Remark',
-		key: 'remark',
-	})
-	// Only shown when a student actually has supplementary data.
-	if (hasSupp) {
-		tableData.value.columns.push({
-			label: 'Supp Exam',
-			key: 'supp_exam',
-		})
-		tableData.value.columns.push({
-			label: 'Supp Remark',
-			key: 'supp_remark',
-		})
+		resource.reload()
 	}
 }
 
-/***
- * Calculates the DP and Final Mark for a given exam data and updates the respective variables accordingly.
- */
-const calculateDPAndFinalMark = (
-	examData,
-	tests,
-	assignments,
-	dp,
-	final_mark,
-	practical_tests,
-	number_of_exams,
-) => {
-	const noPracOrOralExam = [
-		'OCAH1101',
-		'ANH2305',
-		'AEC2301',
-		'ANH3503',
-		'AEC2302',
-		'ANH3507',
-		'ANH3506',
-	]
-	const noPracTest = ['OCAH1101', 'ANH2305', 'AEC2301', 'AEC2302', 'ANH3507', 'ANH2404']
-	const noOralExam = ['CLT1101']
+const getTerms = createListResource({
+	doctype: 'Academic Term',
+	fields: ['name', 'academic_year'],
+	auto: true,
+	onSuccess: (response) => {
+		allTerms.value = response.map((term) => ({
+			// `term.name` is the Academic Term docname, which the doctype builds as
+			// `${academic_year} (${term_name})` — the same string the filters need.
+			label: term.name,
+			onClick: () => {
+				if (selectedTerm.value === term.name) return
+				loadTerm(term.academic_year, term.name)
+			},
+		}))
 
-	if (examData && examData.assessment_group.toLowerCase().includes('exam')) {
-		number_of_exams++
-		if (noPracOrOralExam.some((assessment) => examData.course.includes(assessment))) {
-			/*
-        For courses with no practical or oral exams, the final mark is calculated based on the theory exam alone, 
-        which contributes 50% to the final mark.
-        The number_of_exams is set to 3 to ensure that the DP contribution is added to the final mark.
-       */
-			number_of_exams = 3
-			final_mark +=
-				(parseFloat(examData.total_score) / parseFloat(examData.maximum_score)) * 50.0
-		} else if (noOralExam.some((assessment) => examData.course.includes(assessment))) {
-			// When Courses have no oral exam theory exams contribute 40% and practical contributes 60% to the exam mark
-			// The final mark is calculated based on the contributions of the theory and practical exams, which together contribute 50% to the final mark.
-			if (examData.assessment_group.toLowerCase().includes('theory exam')) {
-				final_mark +=
-					(parseFloat(examData.total_score) / parseFloat(examData.maximum_score)) *
-					40.0 *
-					0.5
-			} else if (examData.assessment_group.toLowerCase().includes('practical exam')) {
-				number_of_exams++
-				final_mark +=
-					(parseFloat(examData.total_score) / parseFloat(examData.maximum_score)) *
-					60.0 *
-					0.5
-			}
-		} else {
-			// For courses with all three exams, the final mark is calculated based on the contributions of the
-			// theory, practical, and oral exams, which together contribute 50% to the final mark.
-			if (examData.assessment_group.toLowerCase().includes('theory exam')) {
-				final_mark +=
-					(parseFloat(examData.total_score) / parseFloat(examData.maximum_score)) *
-					40.0 *
-					0.5
-			} else if (examData.assessment_group.toLowerCase().includes('practical exam')) {
-				final_mark +=
-					(parseFloat(examData.total_score) / parseFloat(examData.maximum_score)) *
-					50.0 *
-					0.5
-			} else if (examData.assessment_group.toLowerCase().includes('oral exam')) {
-				final_mark +=
-					(parseFloat(examData.total_score) / parseFloat(examData.maximum_score)) *
-					10.0 *
-					0.5
-			}
-		}
-		// Add DP contribution if all exams are conducted.
-		// DP contributes 50% to the final mark.
-		if (number_of_exams == 3) {
-			final_mark += dp * 0.5
-		}
-	} else if (
-		examData &&
-		examData.assessment_group.toLowerCase().includes('test') &&
-		!examData.assessment_group.toLowerCase().includes('practical test')
-	) {
-		/*
-     Practical tests account for 50% of the dp for modules with a practical test, written tests and assignments are
-     multiplied by 0.5 to account for their contribution to the DP when a practical test is present. 
-     practical_tests is set to 1 to ensure the results are displayed for modules without a practical test.
-     For modules without a practical test, written tests and assignments contribute fully to the DP. 
-     */
-		tests++
-		if (noPracTest.some((assessment) => examData.course.includes(assessment))) {
-			practical_tests = 1
-			dp += (parseFloat(examData.total_score) / parseFloat(examData.maximum_score)) * 30
-		} else {
-			dp +=
-				(parseFloat(examData.total_score) / parseFloat(examData.maximum_score)) *
-				30.0 *
-				0.5
-		}
-	} else if (examData && examData.assessment_group.toLowerCase().includes('assignment')) {
-		assignments++
-		if (noPracTest.some((assessment) => examData.course.includes(assessment))) {
-			practical_tests = 1
-			dp += (parseFloat(examData.total_score) / parseFloat(examData.maximum_score)) * 20.0
-		} else {
-			dp +=
-				(parseFloat(examData.total_score) / parseFloat(examData.maximum_score)) *
-				20.0 *
-				0.5
-		}
-	} else if (examData && examData.assessment_group.toLowerCase().includes('practical test')) {
-		practical_tests++
-		if (noPracTest.some((assessment) => examData.course.includes(assessment))) {
-			practical_tests = 1
-			dp += 0
-		} else {
-			dp += (parseFloat(examData.total_score) / parseFloat(examData.maximum_score)) * 50.0
-		}
+		const { academic_year, academic_term } = currentProgram.value || {}
+		if (academic_term) loadTerm(academic_year, academic_term)
+	},
+})
+
+// The supplementary exam is reported in its own columns and takes no part in
+// the DP or the final mark.
+const supplementaryByCourse = computed(() => {
+	const byCourse = {}
+	for (const result of assessmentResults.value) {
+		if (result.assessment_group === SUPP_GROUP) byCourse[result.course] = result
 	}
+	return byCourse
+})
 
-	return { dp, final_mark, tests, assignments, practical_tests, number_of_exams }
-}
+const tableRows = computed(() => {
+	const mainResults = assessmentResults.value.filter((r) => r.assessment_group !== SUPP_GROUP)
+	const courses = groupBy(mainResults, (row) => row.course)
+
+	return Object.keys(courses).map((course) => {
+		const courseResults = courses[course]
+		// Every result in view comes from the one selected term, so any of the
+		// course's rows carries the year and term the remarks are matched on.
+		const { academic_year, academic_term } = courseResults[0]
+		const { dp, finalMark, dpComplete, examsComplete } = calculateCourseMarks(
+			course,
+			courseResults,
+		)
+		const supp = supplementaryByCourse.value[course]
+
+		return {
+			// ListView keys rows by `row-key="id"`; without a unique id every row
+			// keys to `undefined`, so Vue can't diff them and the table fails to
+			// re-render when switching terms. Course code is unique per row.
+			id: course,
+			course: course,
+			dp: dpComplete ? `${Math.round(dp)}%` : '-',
+			final_mark: dpComplete && examsComplete ? `${Math.round(finalMark)}%` : '-',
+			remark: findRemark(academicRemarks.value, course, academic_year, academic_term),
+			supp_exam:
+				supp && parseFloat(supp.maximum_score)
+					? `${Math.round(scoreRatio(supp) * 100)}%`
+					: '-',
+			supp_remark: findRemark(
+				supplementaryRemarks.value,
+				course,
+				supp ? supp.academic_year : academic_year,
+				supp ? supp.academic_term : academic_term,
+			),
+		}
+	})
+})
+
+// The supplementary columns only appear when a course in view actually has a
+// supplementary result or remark.
+const hasSupplementary = computed(() => {
+	const remarked = new Set(supplementaryRemarks.value.map((r) => r.course))
+	return tableRows.value.some(
+		(row) => supplementaryByCourse.value[row.course] || remarked.has(row.course),
+	)
+})
+
+const tableColumns = computed(() => {
+	const columns = [
+		{ label: 'Course', key: 'course' },
+		{ label: 'DP', key: 'dp' },
+		{ label: 'Final Mark', key: 'final_mark' },
+		{ label: 'Remark', key: 'remark' },
+	]
+	if (hasSupplementary.value) {
+		columns.push(
+			{ label: 'Supp Exam', key: 'supp_exam' },
+			{ label: 'Supp Remark', key: 'supp_remark' },
+		)
+	}
+	return columns
+})
+
+// The first failure across the four requests, if any. Shown in place of the
+// table rather than leaving an empty one behind.
+const loadError = computed(() =>
+	[getTerms, grades, remarks, supp_remarks].map((resource) => resource.list.error).find(Boolean),
+)
+
+// What the page shows: the table, an error, or a message standing in for it.
+// Ordered so the more specific reason wins — an unloaded student reads better
+// than "no grades found", which is what an empty table would have implied.
+const view = computed(() => {
+	const message = (text) => ({ state: 'message', message: text })
+
+	if (loadError.value) return { state: 'error' }
+	if (!student.value) return message('Your student details could not be loaded.')
+	if (getTerms.list.loading || !getTerms.list.fetched) return message('Loading grades...')
+	if (!selectedTerm.value) return message('Select a term to see your grades.')
+	if (grades.list.loading || !grades.list.fetched) return message('Loading grades...')
+	if (!tableRows.value.length) return message(`No grades found for ${selectedTerm.value}.`)
+	return { state: 'table' }
+})
+
+// The stored remark for a course in a given term, or '-' when there is none.
+// Matching on year and term matters while a term switch is in flight: the
+// previous term's remarks are still loaded until the new ones arrive.
+const findRemark = (remarkList, course, academic_year, academic_term) =>
+	remarkList.find(
+		(r) =>
+			r.course === course &&
+			r.academic_year === academic_year &&
+			r.academic_term === academic_term,
+	)?.remark || '-'
 </script>
 
 <style scoped>

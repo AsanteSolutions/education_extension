@@ -163,7 +163,12 @@ def _weightage(row):
 
 
 def get_assessment_results(student, academic_term):
-	"""Every submitted result for a student in a term, grouped by course."""
+	"""Every mark for a student in a term, grouped by course.
+
+	A course with an approved Course Mark Sheet is read from that sheet, which is
+	the record for the marks it carries. Everything else comes from Assessment
+	Result, so a term captured before the sheets existed still reads correctly.
+	"""
 	results = frappe.get_all(
 		"Assessment Result",
 		fields=["course", "assessment_group", "total_score", "maximum_score"],
@@ -178,6 +183,46 @@ def get_assessment_results(student, academic_term):
 	by_course = {}
 	for result in results:
 		by_course.setdefault(result.course, []).append(dict(result))
+
+	# The sheet wins for its own course, wholesale rather than row by row: half a
+	# course's marks from one source and half from another would be nobody's
+	# answer.
+	by_course.update(get_sheet_marks(student, academic_term))
+	return by_course
+
+
+def get_sheet_marks(student, academic_term):
+	"""A student's marks from approved Course Mark Sheets, grouped by course.
+
+	Moderation is applied here rather than by the reader: a moderated sheet
+	reports the moderated score, and the raw one stays on the sheet untouched.
+	"""
+	rows = frappe.db.sql(
+		"""
+		select sheet.course, entry.assessment_group, entry.raw_score, entry.moderated_score,
+		       entry.maximum_score, sheet.moderation_method
+		from `tabCourse Mark Sheet Entry` entry
+		join `tabCourse Mark Sheet` sheet on sheet.name = entry.parent
+		where sheet.docstatus = 1
+		  and sheet.academic_term = %(academic_term)s
+		  and entry.student = %(student)s
+		  and entry.status = 'Marked'
+		""",
+		{"student": student, "academic_term": academic_term},
+		as_dict=True,
+	)
+
+	by_course = {}
+	for row in rows:
+		moderated = row.moderation_method in ("Linear Scale", "Flat Adjustment")
+		by_course.setdefault(row.course, []).append(
+			{
+				"course": row.course,
+				"assessment_group": row.assessment_group,
+				"total_score": row.moderated_score if moderated else row.raw_score,
+				"maximum_score": row.maximum_score or 100,
+			}
+		)
 	return by_course
 
 

@@ -1,0 +1,119 @@
+# Copyright (c) 2026, Asante Solutions and contributors
+# For license information, please see license.txt
+
+import frappe
+from frappe.tests.utils import FrappeTestCase
+
+from education_extension.education_extension.doctype.course_mark_sheet.course_mark_sheet import (
+	ABSENT,
+	MARKED,
+	MODERATION_FLAT,
+	MODERATION_LINEAR,
+	MODERATION_NONE,
+	NOT_MARKED,
+	moderated_value,
+)
+
+
+def sheet_with(entries, moderation_method=MODERATION_NONE):
+	"""A sheet held in memory. Enough for the parts that are pure arithmetic,
+	without needing a course, a scheme or a term to exist."""
+	doc = frappe.get_doc(
+		{
+			"doctype": "Course Mark Sheet",
+			"course": "TEST1101 - Test Course",
+			"sitting": "Main",
+			"moderation_method": moderation_method,
+			"entries": [
+				{
+					"student": student,
+					"assessment_group": group,
+					"status": status,
+					"raw_score": raw,
+					"moderated_score": moderated,
+					"maximum_score": 100,
+				}
+				for student, group, status, raw, moderated in entries
+			],
+		}
+	)
+	return doc
+
+
+class TestCourseMarkSheet(FrappeTestCase):
+	def test_an_unmarked_assessment_has_no_score(self):
+		"""Zero is a mark. Not having one is not, which a Float alone cannot say."""
+		doc = sheet_with([("S1", "Test 1", NOT_MARKED, 0, 0)])
+		self.assertIsNone(doc.effective_score(doc.entries[0]))
+
+	def test_a_zero_is_a_score(self):
+		doc = sheet_with([("S1", "Test 1", MARKED, 0, 0)])
+		self.assertEqual(doc.effective_score(doc.entries[0]), 0)
+
+	def test_an_absent_assessment_has_no_score(self):
+		doc = sheet_with([("S1", "Test 1", ABSENT, 0, 0)])
+		self.assertIsNone(doc.effective_score(doc.entries[0]))
+
+	def test_the_moderated_score_counts_while_moderation_stands(self):
+		doc = sheet_with([("S1", "Test 1", MARKED, 60, 65)], moderation_method=MODERATION_FLAT)
+		self.assertEqual(doc.effective_score(doc.entries[0]), 65)
+
+	def test_the_raw_score_counts_once_moderation_is_cleared(self):
+		doc = sheet_with([("S1", "Test 1", MARKED, 60, 65)], moderation_method=MODERATION_NONE)
+		self.assertEqual(doc.effective_score(doc.entries[0]), 60)
+
+	def test_marks_leaves_out_what_has_no_score(self):
+		doc = sheet_with(
+			[
+				("S1", "Test 1", MARKED, 60, 0),
+				("S1", "Test 2", ABSENT, 0, 0),
+				("S2", "Test 1", NOT_MARKED, 0, 0),
+			]
+		)
+		marks = doc.marks()
+		self.assertEqual(len(marks), 1)
+		self.assertEqual(marks[0]["student"], "S1")
+		self.assertEqual(marks[0]["total_score"], 60)
+
+	def test_a_score_beyond_the_maximum_is_rejected(self):
+		doc = sheet_with([("S1", "Test 1", MARKED, 140, 0)])
+		self.assertRaises(frappe.ValidationError, doc.validate_entries)
+
+	def test_a_negative_score_is_rejected(self):
+		doc = sheet_with([("S1", "Test 1", MARKED, -1, 0)])
+		self.assertRaises(frappe.ValidationError, doc.validate_entries)
+
+	def test_a_student_cannot_have_two_rows_for_one_assessment(self):
+		doc = sheet_with(
+			[("S1", "Test 1", MARKED, 60, 0), ("S1", "Test 1", MARKED, 70, 0)]
+		)
+		self.assertRaises(frappe.ValidationError, doc.validate_entries)
+
+	def test_an_unmarked_row_blocks_approval(self):
+		doc = sheet_with([("S1", "Test 1", MARKED, 60, 0), ("S2", "Test 1", NOT_MARKED, 0, 0)])
+		self.assertRaises(frappe.ValidationError, doc.validate_every_mark_accounted_for)
+
+	def test_an_absent_row_does_not_block_approval(self):
+		"""Absent is a decision that has been made; unmarked is one that has not."""
+		doc = sheet_with([("S1", "Test 1", MARKED, 60, 0), ("S2", "Test 1", ABSENT, 0, 0)])
+		doc.validate_every_mark_accounted_for()
+
+	def test_moderation_summary_reports_the_shift(self):
+		doc = sheet_with(
+			[("S1", "Test 1", MARKED, 50, 55), ("S2", "Test 1", MARKED, 70, 75)],
+			moderation_method=MODERATION_FLAT,
+		)
+		summary = doc.moderation_summary()
+		self.assertEqual(summary["adjusted"], 2)
+		self.assertEqual(summary["average_before"], 60)
+		self.assertEqual(summary["average_after"], 65)
+
+	def test_scaling_cannot_push_a_mark_past_the_maximum(self):
+		self.assertEqual(moderated_value(98, 100, MODERATION_LINEAR, 1.5), 100)
+
+	def test_a_deduction_cannot_push_a_mark_below_zero(self):
+		self.assertEqual(moderated_value(3, 100, MODERATION_FLAT, -10), 0)
+
+	def test_scaling_and_adding_do_what_they_say(self):
+		self.assertEqual(moderated_value(60, 100, MODERATION_LINEAR, 1.1), 66)
+		self.assertEqual(moderated_value(60, 100, MODERATION_FLAT, 5), 65)

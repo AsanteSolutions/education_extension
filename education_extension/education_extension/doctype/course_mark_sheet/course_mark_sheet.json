@@ -1,0 +1,307 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "CMSH-.YYYY.-.#####",
+ "creation": "2026-08-27 13:40:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "course",
+  "course_name",
+  "academic_year",
+  "academic_term",
+  "column_break_main",
+  "sitting",
+  "student_group",
+  "mark_scheme",
+  "workflow_state",
+  "amended_from",
+  "section_break_entries",
+  "entries",
+  "section_break_moderation",
+  "moderation_method",
+  "moderation_value",
+  "moderated_by",
+  "column_break_moderation",
+  "moderated_on",
+  "moderation_reason",
+  "section_break_trail",
+  "entered_by",
+  "checked_by",
+  "approved_by",
+  "column_break_trail",
+  "results_written",
+  "results_skipped",
+  "return_reason"
+ ],
+ "fields": [
+  {
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Course",
+   "options": "Course",
+   "reqd": 1,
+   "search_index": 1,
+   "set_only_once": 1
+  },
+  {
+   "fetch_from": "course.course_name",
+   "fieldname": "course_name",
+   "fieldtype": "Data",
+   "label": "Course Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "academic_year",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Academic Year",
+   "options": "Academic Year",
+   "reqd": 1,
+   "search_index": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "academic_term",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Academic Term",
+   "options": "Academic Term",
+   "reqd": 1,
+   "search_index": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Main",
+   "description": "Supplementary and aegrotat marks run through their own sheet, on their own timeline.",
+   "fieldname": "sitting",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Sitting",
+   "options": "Main\nSupplementary\nAegrotat\nSpecial",
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "description": "Whose students to mark. Left blank, the students enrolled for the course in this term are used.",
+   "fieldname": "student_group",
+   "fieldtype": "Link",
+   "label": "Student Group",
+   "options": "Student Group"
+  },
+  {
+   "description": "The breakdown these marks were worked out under, stamped when the sheet was generated so a reprint reproduces them.",
+   "fieldname": "mark_scheme",
+   "fieldtype": "Link",
+   "label": "Mark Scheme",
+   "options": "Course Mark Scheme",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "workflow_state",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "in_standard_filter": 1,
+   "label": "Workflow State",
+   "no_copy": 1,
+   "options": "Workflow State",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Course Mark Sheet",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "section_break_entries",
+   "fieldtype": "Section Break",
+   "label": "Marks"
+  },
+  {
+   "description": "One row per student per assessment, generated from the course's mark scheme.",
+   "fieldname": "entries",
+   "fieldtype": "Table",
+   "label": "Entries",
+   "options": "Course Mark Sheet Entry"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_moderation",
+   "fieldtype": "Section Break",
+   "label": "Moderation"
+  },
+  {
+   "default": "None",
+   "fieldname": "moderation_method",
+   "fieldtype": "Select",
+   "label": "Method",
+   "options": "None\nLinear Scale\nFlat Adjustment",
+   "read_only": 1
+  },
+  {
+   "description": "The factor to scale by, or the marks to add.",
+   "fieldname": "moderation_value",
+   "fieldtype": "Float",
+   "label": "Value",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "fieldname": "moderated_by",
+   "fieldtype": "Link",
+   "label": "Moderated By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_moderation",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "moderated_on",
+   "fieldtype": "Datetime",
+   "label": "Moderated On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "moderation_reason",
+   "fieldtype": "Small Text",
+   "label": "Reason",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_trail",
+   "fieldtype": "Section Break",
+   "label": "Trail"
+  },
+  {
+   "fieldname": "entered_by",
+   "fieldtype": "Link",
+   "label": "Entered By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "checked_by",
+   "fieldtype": "Link",
+   "label": "Checked By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approved_by",
+   "fieldtype": "Link",
+   "label": "Approved By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_trail",
+   "fieldtype": "Column Break"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "results_written",
+   "fieldtype": "Int",
+   "label": "Results Written",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "description": "Assessment Results that already existed and were left alone.",
+   "fieldname": "results_skipped",
+   "fieldtype": "Int",
+   "label": "Results Skipped",
+   "read_only": 1
+  },
+  {
+   "fieldname": "return_reason",
+   "fieldtype": "Small Text",
+   "label": "Last Returned Because",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-08-27 13:40:00.000000",
+ "modified_by": "Administrator",
+ "module": "Education Extension",
+ "name": "Course Mark Sheet",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Education Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Academics User",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Instructor",
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "course"
+}

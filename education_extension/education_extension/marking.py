@@ -18,12 +18,12 @@ import frappe
 
 from education_extension.education_extension.doctype.course_mark_scheme.course_mark_scheme import (
 	COURSEWORK,
-	EXAMINATION,
 	get_scheme,
 )
 from education_extension.education_extension.doctype.student_progress_report.student_progress_report import (
 	SUPP_GROUP,
 	calculate_final_results,
+	calculate_final_results_detailed,
 	get_results,
 	round_half_up,
 )
@@ -162,13 +162,8 @@ def _weightage(row):
 	return float(_field(row, "weightage", default=0) or 0)
 
 
-def get_course_marks(student, academic_year, academic_term):
-	"""Every scheme-marked course for a student in a term, keyed by course.
-
-	Courses whose scheme is missing are absent from the result entirely — the
-	caller decides what to do about them, which during the changeover means
-	falling back to the legacy calculation.
-	"""
+def get_assessment_results(student, academic_term):
+	"""Every submitted result for a student in a term, grouped by course."""
 	results = frappe.get_all(
 		"Assessment Result",
 		fields=["course", "assessment_group", "total_score", "maximum_score"],
@@ -183,9 +178,18 @@ def get_course_marks(student, academic_year, academic_term):
 	by_course = {}
 	for result in results:
 		by_course.setdefault(result.course, []).append(dict(result))
+	return by_course
 
+
+def get_course_marks(student, academic_year, academic_term):
+	"""Every scheme-marked course for a student in a term, keyed by course.
+
+	Courses whose scheme is missing are absent from the result entirely — the
+	caller decides what to do about them, which during the changeover means
+	falling back to the legacy calculation.
+	"""
 	marks = {}
-	for course, course_results in by_course.items():
+	for course, course_results in get_assessment_results(student, academic_term).items():
 		scheme = get_scheme(course, academic_year)
 		if not scheme:
 			continue
@@ -193,6 +197,136 @@ def get_course_marks(student, academic_year, academic_term):
 		marks[course]["scheme"] = scheme.name
 
 	return marks
+
+
+def student_marks(student, academic_year, academic_term):
+	"""The DP and final mark for every course a student has results in.
+
+	The one entry point both the portal and the printed report read. A course
+	with a submitted Course Mark Scheme is marked from it; a course without one
+	falls back to the calculation whose weightings are written into
+	student_progress_report, so a term converts on its own without a mode to set
+	anywhere.
+
+	Each course reports `scheme` — the scheme that produced the mark, or None
+	where the legacy calculation did.
+	"""
+	by_course = get_assessment_results(student, academic_term)
+
+	marks = {}
+	legacy_results = []
+
+	for course, course_results in by_course.items():
+		scheme = get_scheme(course, academic_year)
+		if scheme:
+			computed = calculate_course_mark(scheme.criteria, course_results)
+			computed["scheme"] = scheme.name
+			marks[course] = computed
+		else:
+			legacy_results.extend(course_results)
+
+	if legacy_results:
+		for course, computed in calculate_final_results_detailed(legacy_results).items():
+			computed["scheme"] = None
+			computed.setdefault("missing", [])
+			computed.setdefault("failed_subminima", [])
+			computed.setdefault("unscheduled", [])
+			marks[course] = computed
+
+	return marks
+
+
+def final_marks(student, academic_year, academic_term):
+	"""Final mark per course in the form the printed report shows it: a whole
+	percentage, or a dash while the marks are incomplete."""
+	return {
+		course: format_mark(marks["final_mark"], marks["dp_complete"] and marks["exams_complete"])
+		for course, marks in student_marks(student, academic_year, academic_term).items()
+	}
+
+
+@frappe.whitelist()
+def get_student_grades(academic_year, academic_term):
+	"""The grades table for the logged-in student, ready to render.
+
+	The portal used to fetch raw results and work the marks out in the browser,
+	which meant the weightings existed a second time in JavaScript. It now asks
+	for the finished rows, so there is one calculation and a student cannot see a
+	mark the server did not produce.
+
+	The student is taken from the session, never from the caller.
+	"""
+	from education_extension.education_extension.api import _current_user_student
+
+	student = _current_user_student()
+	if not student:
+		return {"rows": [], "has_supplementary": False}
+
+	marks = student_marks(student, academic_year, academic_term)
+	supplementary = _supplementary_marks(student, academic_term)
+	comments = _remarks(student, academic_term, "Academic Remark", "remark")
+	supplementary_comments = _remarks(
+		student, academic_term, "Supplementary Academic Remark", "supp_remark"
+	)
+
+	rows = []
+	for course in sorted(marks):
+		computed = marks[course]
+		complete = computed["dp_complete"] and computed["exams_complete"]
+		rows.append(
+			{
+				# The table keys rows by id; a course appears once per term.
+				"id": course,
+				"course": course,
+				"dp": f"{round_half_up(computed['dp'])}%" if computed["dp_complete"] else "-",
+				"final_mark": f"{round_half_up(computed['final_mark'])}%" if complete else "-",
+				"remark": comments.get(course, "-"),
+				"supp_exam": supplementary.get(course, "-"),
+				"supp_remark": supplementary_comments.get(course, "-"),
+			}
+		)
+
+	return {
+		"rows": rows,
+		# The supplementary columns only appear when the student has something in
+		# them, which most do not.
+		"has_supplementary": bool(supplementary or supplementary_comments),
+	}
+
+
+def _supplementary_marks(student, academic_term):
+	"""The supplementary exam mark per course, as a percentage. Reported on its
+	own and never folded into the final mark."""
+	rows = frappe.get_all(
+		"Assessment Result",
+		fields=["course", "total_score", "maximum_score"],
+		filters={
+			"student": student,
+			"academic_term": academic_term,
+			"assessment_group": SUPP_GROUP,
+			"docstatus": 1,
+		},
+		limit_page_length=0,
+	)
+
+	marks = {}
+	for row in rows:
+		ratio = score_ratio(dict(row))
+		if ratio is not None:
+			marks[row.course] = f"{round_half_up(ratio * 100)}%"
+	return marks
+
+
+def _remarks(student, academic_term, doctype, fieldname):
+	"""Stored comments per course. Never derived from the mark — a course with
+	no comment on file shows nothing."""
+	rows = frappe.get_all(
+		doctype,
+		fields=["course", fieldname],
+		filters={"student": student, "academic_term": academic_term, "docstatus": 1},
+		limit_page_length=0,
+	)
+	return {row.course: row.get(fieldname) for row in rows if row.get(fieldname)}
 
 
 def format_mark(mark, complete):

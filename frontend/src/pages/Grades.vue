@@ -46,7 +46,7 @@ import {
 	ListView,
 	createListResource,
 } from 'frappe-ui'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { studentStore } from '@/stores/student'
 import MissingData from '@/components/MissingData.vue'
 import { groupBy } from '@/utils'
@@ -136,25 +136,53 @@ const loadTerm = (academic_year, academic_term) => {
 	}
 }
 
-const getTerms = createListResource({
-	doctype: 'Academic Term',
-	fields: ['name', 'academic_year'],
-	auto: true,
+// The terms on offer are the ones the student is actually enrolled for, not
+// every Academic Term on the site. A student can hold more than one enrolment
+// in a term, and the term is optional on an enrolment, so the responses are
+// reduced to the distinct terms that carry one.
+const enrollments = createListResource({
+	doctype: 'Program Enrollment',
+	fields: ['academic_year', 'academic_term'],
+	pageLength: 256,
+	auto: false,
 	onSuccess: (response) => {
-		allTerms.value = response.map((term) => ({
-			// `term.name` is the Academic Term docname, which the doctype builds as
-			// `${academic_year} (${term_name})` — the same string the filters need.
-			label: term.name,
-			onClick: () => {
-				if (selectedTerm.value === term.name) return
-				loadTerm(term.academic_year, term.name)
-			},
-		}))
+		const byTerm = new Map()
+		for (const enrollment of response) {
+			// `academic_term` is a link to Academic Term, so its value is that
+			// doctype's docname — `${academic_year} (${term_name})`, the same string
+			// the filters need.
+			if (enrollment.academic_term && !byTerm.has(enrollment.academic_term)) {
+				byTerm.set(enrollment.academic_term, enrollment.academic_year)
+			}
+		}
+
+		allTerms.value = [...byTerm.keys()]
+			// The docname sorts by year and then term, so this is chronological.
+			.sort()
+			.map((term) => ({
+				label: term,
+				onClick: () => {
+					if (selectedTerm.value === term) return
+					loadTerm(byTerm.get(term), term)
+				},
+			}))
 
 		const { academic_year, academic_term } = currentProgram.value || {}
 		if (academic_term) loadTerm(academic_year, academic_term)
 	},
 })
+
+// Fetched as soon as there is a student to fetch them for, whether the store
+// had already loaded by the time this page mounted or lands later.
+watch(
+	student,
+	(name) => {
+		if (!name) return
+		enrollments.update({ filters: { student: name, docstatus: 1 } })
+		enrollments.reload()
+	},
+	{ immediate: true },
+)
 
 // The supplementary exam is reported in its own columns and takes no part in
 // the DP or the final mark.
@@ -232,7 +260,9 @@ const tableColumns = computed(() => {
 // The first failure across the four requests, if any. Shown in place of the
 // table rather than leaving an empty one behind.
 const loadError = computed(() =>
-	[getTerms, grades, remarks, supp_remarks].map((resource) => resource.list.error).find(Boolean),
+	[enrollments, grades, remarks, supp_remarks]
+		.map((resource) => resource.list.error)
+		.find(Boolean),
 )
 
 // What the page shows: the table, an error, or a message standing in for it.
@@ -243,7 +273,8 @@ const view = computed(() => {
 
 	if (loadError.value) return { state: 'error' }
 	if (!student.value) return message('Your student details could not be loaded.')
-	if (getTerms.list.loading || !getTerms.list.fetched) return message('Loading grades...')
+	if (enrollments.list.loading || !enrollments.list.fetched) return message('Loading grades...')
+	if (!allTerms.value.length) return message('You are not enrolled for any term yet.')
 	if (!selectedTerm.value) return message('Select a term to see your grades.')
 	if (grades.list.loading || !grades.list.fetched) return message('Loading grades...')
 	if (!tableRows.value.length) return message(`No grades found for ${selectedTerm.value}.`)

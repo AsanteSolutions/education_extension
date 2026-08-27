@@ -32,6 +32,15 @@ ISSUE_DATE_SUPPLEMENTARY = "Supplementary"
 ISSUE_DATE_REMARKING = "Remarking"
 ISSUE_DATE_AEGROTAT = "AEGROTAT"
 
+# Which sittings a course is examined and assessed on. These are the exceptions
+# to the standard shape (two tests, two assignments, a practical test, and theory,
+# practical and oral papers); a course code absent from a set follows the standard.
+# Module-level so Course Mark Scheme can generate the equivalent scheme rows from
+# them instead of keeping a second copy.
+NO_PRAC_OR_ORAL_EXAM = {"OCAH1101", "ANH2305", "AEC2301", "ANH3503", "AEC2302", "ANH3507", "ANH3506"}
+NO_PRAC_TEST = {"OCAH1101", "ANH2305", "AEC2301", "AEC2302", "ANH3507", "ANH2404"}
+NO_ORAL_EXAM = {"CLT1101"}
+
 
 class StudentProgressReport(Document):
 	pass
@@ -476,10 +485,6 @@ def calculate_final_results(results):
 
     NUMBER_OF_ASSIGNMENTS = 2
     NUMBER_OF_TESTS = 2
-
-    NO_PRAC_OR_ORAL_EXAM = {"OCAH1101", "ANH2305", "AEC2301", "ANH3503", "AEC2302", "ANH3507", "ANH3506"}
-    NO_PRAC_TEST = {"OCAH1101", "ANH2305", "AEC2301", "AEC2302", "ANH3507", "ANH2404"}
-    NO_ORAL_EXAM = {"CLT1101"}
 
     group_to_field = {
         "Assignment 1": "assignment_1",

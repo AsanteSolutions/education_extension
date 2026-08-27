@@ -17,6 +17,8 @@
   "workflow_state",
   "amended_from",
   "section_break_entries",
+  "mark_entry",
+  "section_break_all_entries",
   "entries",
   "section_break_moderation",
   "moderation_method",
@@ -130,7 +132,18 @@
   {
    "fieldname": "section_break_entries",
    "fieldtype": "Section Break",
-   "label": "Marks"
+   "label": "Mark Entry"
+  },
+  {
+   "fieldname": "mark_entry",
+   "fieldtype": "HTML",
+   "label": "Mark Entry"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_all_entries",
+   "fieldtype": "Section Break",
+   "label": "All Entries"
   },
   {
    "description": "One row per student per assessment, generated from the course's mark scheme.",

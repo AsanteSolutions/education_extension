@@ -179,6 +179,45 @@ class CourseMarkSheet(Document):
 			return entry.moderated_score
 		return entry.raw_score
 
+	def outstanding_count(self):
+		"""How many marks are still neither entered nor accounted for as absent."""
+		return sum(1 for entry in self.entries if entry.status == NOT_MARKED)
+
+	@frappe.whitelist()
+	def save_marks(self, changes):
+		"""Apply a batch of marks from the entry grid.
+
+		The grid sends only the cells that changed, so a lecturer working through
+		a course of eighty students is not posting eight hundred rows back on every
+		save. Anything the sheet does not have a row for is ignored rather than
+		created: the roll comes from the enrolment, not from the browser.
+		"""
+		if self.workflow_state not in ENTRY_STATES:
+			frappe.throw(_("Marks can only be entered while the sheet is with the lecturer."))
+
+		if isinstance(changes, str):
+			changes = frappe.parse_json(changes)
+
+		by_key = {(entry.student, entry.assessment_group): entry for entry in self.entries}
+		applied = 0
+
+		for change in changes:
+			entry = by_key.get((change.get("student"), change.get("assessment_group")))
+			if not entry:
+				continue
+
+			status = change.get("status")
+			if status not in (NOT_MARKED, MARKED, ABSENT):
+				frappe.throw(_("{0} is not a mark status.").format(frappe.bold(status)))
+
+			entry.status = status
+			entry.raw_score = float(change.get("raw_score") or 0) if status == MARKED else 0
+			applied += 1
+
+		self.entered_by = frappe.session.user
+		self.save()
+		return {"applied": applied, "outstanding": self.outstanding_count()}
+
 	@frappe.whitelist()
 	def generate_entries(self):
 		"""Build a row per student per assessment from the course's scheme.

@@ -15,12 +15,15 @@ to the legacy calculation, which is what lets a term convert on its own.
 import re
 
 import frappe
+from frappe import _
 
 from education_extension.education_extension.doctype.course_mark_scheme.course_mark_scheme import (
 	COURSEWORK,
 	get_scheme,
 )
 from education_extension.education_extension.doctype.student_progress_report.student_progress_report import (
+	ISSUE_DATE_STANDARD,
+	ISSUE_DATE_SUPPLEMENTARY,
 	SUPP_GROUP,
 	calculate_final_results,
 	calculate_final_results_detailed,
@@ -302,17 +305,33 @@ def get_student_grades(academic_year, academic_term):
 	The student is taken from the session, never from the caller.
 	"""
 	from education_extension.education_extension.api import _current_user_student
+	from education_extension.education_extension.doctype.progress_report_issue_date.progress_report_issue_date import (
+		is_released,
+	)
 
 	student = _current_user_student()
 	if not student:
-		return {"rows": [], "has_supplementary": False}
+		return _nothing_to_show(False, _("Your student details could not be loaded."))
+
+	# Approved is not the same as published. Marks wait here until the term's
+	# release moment, however far through checking and approval they are.
+	if not is_released(academic_year, academic_term, ISSUE_DATE_STANDARD):
+		return _nothing_to_show(
+			False, _("Results for {0} have not been published yet.").format(academic_term)
+		)
 
 	marks = student_marks(student, academic_year, academic_term)
-	supplementary = _supplementary_marks(student, academic_term)
 	comments = _remarks(student, academic_term, "Academic Remark", "remark")
-	supplementary_comments = _remarks(
-		student, academic_term, "Supplementary Academic Remark", "supp_remark"
-	)
+
+	# The supplementary sitting is released on its own date, so a student can be
+	# looking at their main marks while the supplementary ones are still held.
+	if is_released(academic_year, academic_term, ISSUE_DATE_SUPPLEMENTARY):
+		supplementary = _supplementary_marks(student, academic_term)
+		supplementary_comments = _remarks(
+			student, academic_term, "Supplementary Academic Remark", "supp_remark"
+		)
+	else:
+		supplementary, supplementary_comments = {}, {}
 
 	rows = []
 	for course in sorted(marks):
@@ -336,7 +355,15 @@ def get_student_grades(academic_year, academic_term):
 		# The supplementary columns only appear when the student has something in
 		# them, which most do not.
 		"has_supplementary": bool(supplementary or supplementary_comments),
+		"released": True,
+		"message": None,
 	}
+
+
+def _nothing_to_show(released, message):
+	"""An empty table with the reason attached, so the portal can say why rather
+	than implying the student has no marks."""
+	return {"rows": [], "has_supplementary": False, "released": released, "message": message}
 
 
 def _supplementary_marks(student, academic_term):

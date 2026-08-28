@@ -165,6 +165,10 @@ const view = computed(() => {
 	if (!allTerms.value.length) return message('You are not enrolled for any term yet.')
 	if (!selectedTerm.value) return message('Select a term to see your grades.')
 	if (grades.loading || !grades.fetched) return message('Loading grades...')
+	// The server says why there is nothing rather than leaving the page to guess:
+	// results held back before their release date read very differently from
+	// results that do not exist.
+	if (grades.data?.message) return message(grades.data.message)
 	if (!tableRows.value.length) return message(`No grades found for ${selectedTerm.value}.`)
 	return { state: 'table' }
 })

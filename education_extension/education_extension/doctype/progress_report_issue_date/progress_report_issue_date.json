@@ -9,6 +9,7 @@
  "field_order": [
   "section_break_d02f",
   "issue_date",
+  "released_to_students_at",
   "amended_from",
   "column_break_bqsw",
   "issue_date_for",
@@ -35,7 +36,15 @@
    "fieldtype": "Date",
    "in_list_view": 1,
    "label": "Issue Date",
-   "reqd": 1
+   "reqd": 1,
+   "description": "Printed on the progress report as the date it was issued."
+  },
+  {
+   "description": "When students may see these marks on the portal. Until this moment passes the portal shows nothing for this sitting, however far through approval the marks are. Left blank, the issue date is used, from the start of that day.",
+   "fieldname": "released_to_students_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Released to Students At"
   },
   {
    "fieldname": "column_break_bqsw",
@@ -45,7 +54,8 @@
    "fieldname": "issue_date_for",
    "fieldtype": "Select",
    "label": "Issue Date For",
-   "options": "Standard\nSupplementary\nRemarking\nAEGROTAT"
+   "options": "Standard\nSupplementary\nRemarking\nAEGROTAT",
+   "description": "Which run of marks this covers. Standard is the main sitting; the rest apply when the term also carries a supplementary or aegrotat sitting, or results that were remarked."
   },
   {
    "fieldname": "academic_year",

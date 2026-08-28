@@ -1,0 +1,77 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-28 09:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "section_break_students",
+  "student_order",
+  "student_order_description"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_break_students",
+   "fieldtype": "Section Break",
+   "label": "Student Order"
+  },
+  {
+   "default": "Last Name",
+   "description": "How students are listed on mark entry grids and anywhere else a class is shown in order.",
+   "fieldname": "student_order",
+   "fieldtype": "Select",
+   "label": "List Students By",
+   "options": "Last Name\nFirst Name\nStudent Name\nStudent Number\nStudent ID",
+   "reqd": 1
+  },
+  {
+   "fieldname": "student_order_description",
+   "fieldtype": "HTML",
+   "options": "<p class=\"text-muted small\">Changing this affects sheets that are generated or regenerated afterwards. To reorder a sheet that already exists, open it while it is still with the lecturer and use Generate Entries again — the marks already entered are kept.</p>"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-08-28 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Education Extension",
+ "name": "Marking Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Education Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "print": 1,
+   "read": 1,
+   "role": "Academics User"
+  },
+  {
+   "print": 1,
+   "read": 1,
+   "role": "Instructor"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

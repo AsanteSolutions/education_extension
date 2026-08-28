@@ -365,9 +365,18 @@ def _has_aegrotat_result(doc):
 
 
 def _has_remarked_result(doc):
-	"""True when a result or remark for the term has been remarked. Correcting a
-	submitted document in Frappe means cancelling and amending it, so the amendment
-	(`amended_from` set) is the trace a remark leaves behind."""
+	"""True when something for the term has been marked again.
+
+	A Mark Change says so outright. Before that document existed the only trace
+	was an amendment — correcting a submitted document in Frappe means cancelling
+	and amending it — so both still count."""
+	from education_extension.education_extension.doctype.mark_change.mark_change import (
+		has_remark_changes,
+	)
+
+	if has_remark_changes(doc.student, doc.academic_term):
+		return True
+
 	for doctype in ("Assessment Result", "Academic Remark"):
 		if frappe.get_all(
 			doctype,

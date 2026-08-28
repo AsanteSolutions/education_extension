@@ -260,15 +260,20 @@ function render_mark_entry(frm) {
 
 	$wrapper.on('change', '.mark-cell', function () {
 		const $input = $(this)
-		const parsed = parse_mark($input.val(), Number($input.data('max')))
+		const parsed = parse_mark($input.val(), Number($input.attr('data-max')))
 
 		// A cell that cannot be read says so rather than saving a guess.
 		$input.css('border-color', parsed ? '' : 'var(--red-500)')
 		if (!parsed) return
 
-		changed.set($input.data('student') + '|' + $input.data('assessment'), {
-			student: $input.data('student'),
-			assessment_group: $input.data('assessment'),
+		// .attr() rather than .data(): jQuery reads a numeric-looking student id
+		// as a Number, and the sheet holds it as a string.
+		const student = $input.attr('data-student')
+		const assessment = $input.attr('data-assessment')
+
+		changed.set(student + '|' + assessment, {
+			student: student,
+			assessment_group: assessment,
 			status: parsed.status,
 			raw_score: parsed.raw_score,
 		})
@@ -284,9 +289,9 @@ function render_mark_entry(frm) {
 		if (!step) return
 
 		event.preventDefault()
-		const row = Number($(this).data('row')) + step
+		const row = Number($(this).attr('data-row')) + step
 		const $next = $wrapper.find(
-			'.mark-cell[data-row="' + row + '"][data-col="' + $(this).data('col') + '"]',
+			'.mark-cell[data-row="' + row + '"][data-col="' + $(this).attr('data-col') + '"]',
 		)
 		if ($next.length) $next.trigger('focus').trigger('select')
 	})
@@ -298,7 +303,16 @@ function render_mark_entry(frm) {
 			.call('save_marks', { changes: [...changed.values()] })
 			.then((r) => {
 				changed.clear()
-				if (r.message) {
+				if (r.message && r.message.ignored) {
+					frappe.msgprint({
+						title: __('Some marks were not saved'),
+						message: __(
+							'{0} of {1} changes did not match a row on this sheet and were ignored.',
+							[r.message.ignored, r.message.ignored + r.message.applied],
+						),
+						indicator: 'red',
+					})
+				} else if (r.message) {
 					frappe.show_alert({
 						message: __('{0} saved, {1} still to enter', [
 							r.message.applied,

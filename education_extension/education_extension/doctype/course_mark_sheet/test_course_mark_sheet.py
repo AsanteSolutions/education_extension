@@ -11,6 +11,7 @@ from education_extension.education_extension.doctype.course_mark_sheet.course_ma
 	MODERATION_LINEAR,
 	MODERATION_NONE,
 	NOT_MARKED,
+	entry_key,
 	moderated_value,
 )
 
@@ -117,3 +118,13 @@ class TestCourseMarkSheet(FrappeTestCase):
 	def test_scaling_and_adding_do_what_they_say(self):
 		self.assertEqual(moderated_value(60, 100, MODERATION_LINEAR, 1.1), 66)
 		self.assertEqual(moderated_value(60, 100, MODERATION_FLAT, 5), 65)
+
+	def test_a_cell_is_identified_the_same_however_it_arrives(self):
+		"""The browser posts a numeric-looking student id as a number. Keyed on the
+		raw values it would match no row, and the mark would be dropped as one the
+		sheet does not have — a save that saves nothing and reports success."""
+		self.assertEqual(entry_key(20240549, "Test 1"), entry_key("20240549", "Test 1"))
+		self.assertEqual(entry_key("20240549", "Test 1"), ("20240549", "Test 1"))
+
+	def test_an_assessment_named_like_a_number_is_keyed_the_same_way(self):
+		self.assertEqual(entry_key("S1", 1), entry_key("S1", "1"))

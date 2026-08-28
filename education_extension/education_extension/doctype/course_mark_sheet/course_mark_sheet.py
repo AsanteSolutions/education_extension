@@ -40,6 +40,18 @@ MARKED = "Marked"
 ABSENT = "Absent"
 
 
+def entry_key(student, assessment_group):
+	"""Identifies a cell on the sheet.
+
+	As strings, always. A student id that looks like a number arrives from the
+	browser as one — jQuery reads data-student="20240549" as 20240549 — and a key
+	built from the raw values would miss the row it belongs to. The cell would
+	then be dropped as one the sheet does not have, which is a save that saves
+	nothing and says it worked.
+	"""
+	return (str(student), str(assessment_group))
+
+
 def moderated_value(raw_score, maximum, method, value):
 	"""A moderated mark, held inside the possible range.
 
@@ -201,12 +213,14 @@ class CourseMarkSheet(Document):
 		if isinstance(changes, str):
 			changes = frappe.parse_json(changes)
 
-		by_key = {(entry.student, entry.assessment_group): entry for entry in self.entries}
+		by_key = {entry_key(entry.student, entry.assessment_group): entry for entry in self.entries}
 		applied = 0
+		ignored = 0
 
 		for change in changes:
-			entry = by_key.get((change.get("student"), change.get("assessment_group")))
+			entry = by_key.get(entry_key(change.get("student"), change.get("assessment_group")))
 			if not entry:
+				ignored += 1
 				continue
 
 			status = change.get("status")
@@ -219,7 +233,14 @@ class CourseMarkSheet(Document):
 
 		self.entered_by = frappe.session.user
 		self.save()
-		return {"applied": applied, "outstanding": self.outstanding_count()}
+		# `ignored` is reported rather than swallowed: a cell the sheet does not
+		# recognise is far more likely a bug than a hostile browser, and saying
+		# nothing is how a save that saved nothing looks like it worked.
+		return {
+			"applied": applied,
+			"ignored": ignored,
+			"outstanding": self.outstanding_count(),
+		}
 
 	@frappe.whitelist()
 	def generate_entries(self):

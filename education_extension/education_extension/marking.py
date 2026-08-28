@@ -31,19 +31,40 @@ from education_extension.education_extension.doctype.student_progress_report.stu
 	round_half_up,
 )
 
-# An aegrotat sitting is the normal assessment group prefixed with AEGRO, e.g.
-# "AEGRO Theory Exam". Same pattern the portal uses, tolerating the AEGROTAT
-# spelling and a missing separator.
+# Which sitting a mark comes from. Carried on the mark itself rather than read
+# out of the assessment group's name.
+MAIN = "Main"
+SUPPLEMENTARY = "Supplementary"
+AEGROTAT = "Aegrotat"
+
+# The naming convention the sitting field replaced: an aegrotat paper was the
+# normal group prefixed with AEGRO. Still read, because a mark can be recorded
+# against one of those groups through the standard Assessment Result form, where
+# nothing prompts for the sitting.
 AEGROTAT_PREFIX = re.compile(r"^AEGRO(?:TAT)?[\s_-]*", re.IGNORECASE)
 
 
-def sitting_of(assessment_group):
-	"""The assessment a result belongs to, as (group, is_aegrotat). An aegrotat
-	paper stands in for the sitting it prefixes, so both resolve to one group."""
-	group = (assessment_group or "").strip()
-	if AEGROTAT_PREFIX.match(group):
-		return AEGROTAT_PREFIX.sub("", group, count=1), True
-	return group, False
+def sitting_of(result):
+	"""What a mark counts towards, as (assessment, sitting).
+
+	The sitting comes from the mark. Where it says Main but the assessment group
+	is named the old way, the name is believed instead — otherwise an aegrotat
+	paper entered on the standard form would quietly count as nothing.
+	"""
+	group = (result.get("assessment_group") or "").strip()
+	sitting = result.get("sitting") or MAIN
+
+	if sitting == MAIN:
+		if AEGROTAT_PREFIX.match(group):
+			return AEGROTAT_PREFIX.sub("", group, count=1), AEGROTAT
+		if group == SUPP_GROUP:
+			return group, SUPPLEMENTARY
+	elif sitting == AEGROTAT:
+		# An aegrotat mark that still carries the old name stands in for the
+		# assessment the name points at.
+		group = AEGROTAT_PREFIX.sub("", group, count=1)
+
+	return group, sitting
 
 
 def resolve_results(results):
@@ -57,10 +78,11 @@ def resolve_results(results):
 	resolved = {}
 
 	for result in results:
-		if result.get("assessment_group") == SUPP_GROUP:
+		group, sitting = sitting_of(result)
+		if sitting == SUPPLEMENTARY:
 			continue
 
-		group, is_aegrotat = sitting_of(result.get("assessment_group"))
+		is_aegrotat = sitting == AEGROTAT
 		kept = resolved.get(group)
 		if kept and not (is_aegrotat and not kept["is_aegrotat"]):
 			continue
@@ -174,7 +196,13 @@ def get_assessment_results(student, academic_term):
 	"""
 	results = frappe.get_all(
 		"Assessment Result",
-		fields=["course", "assessment_group", "total_score", "maximum_score"],
+		fields=[
+			"course",
+			"assessment_group",
+			"custom_sitting as sitting",
+			"total_score",
+			"maximum_score",
+		],
 		filters={
 			"student": student,
 			"academic_term": academic_term,
@@ -203,7 +231,7 @@ def get_sheet_marks(student, academic_term):
 	rows = frappe.db.sql(
 		"""
 		select sheet.course, entry.assessment_group, entry.raw_score, entry.moderated_score,
-		       entry.maximum_score, sheet.moderation_method
+		       entry.maximum_score, sheet.moderation_method, sheet.sitting
 		from `tabCourse Mark Sheet Entry` entry
 		join `tabCourse Mark Sheet` sheet on sheet.name = entry.parent
 		where sheet.docstatus = 1
@@ -222,6 +250,7 @@ def get_sheet_marks(student, academic_term):
 			{
 				"course": row.course,
 				"assessment_group": row.assessment_group,
+				"sitting": row.sitting,
 				"total_score": row.moderated_score if moderated else row.raw_score,
 				"maximum_score": row.maximum_score or 100,
 			}
@@ -371,13 +400,11 @@ def _supplementary_marks(student, academic_term):
 	own and never folded into the final mark."""
 	rows = frappe.get_all(
 		"Assessment Result",
-		fields=["course", "total_score", "maximum_score"],
-		filters={
-			"student": student,
-			"academic_term": academic_term,
-			"assessment_group": SUPP_GROUP,
-			"docstatus": 1,
-		},
+		fields=["course", "assessment_group", "custom_sitting as sitting", "total_score", "maximum_score"],
+		filters={"student": student, "academic_term": academic_term, "docstatus": 1},
+		# Either the sitting says so, or the group is named the way it was said
+		# before the sitting existed.
+		or_filters={"custom_sitting": SUPPLEMENTARY, "assessment_group": SUPP_GROUP},
 		limit_page_length=0,
 	)
 

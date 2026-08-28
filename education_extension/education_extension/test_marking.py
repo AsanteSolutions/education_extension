@@ -132,14 +132,68 @@ class TestMarking(FrappeTestCase):
 
 		self.assertEqual(mark(criteria, results_for(course, scores)), "60")
 
-	def test_aegrotat_spellings_all_resolve_to_the_same_sitting(self):
-		"""The prefix is stripped; whatever case follows it is left alone."""
+	def test_the_sitting_field_says_what_a_mark_counts_towards(self):
+		"""The field, not the name of the assessment group."""
+		self.assertEqual(
+			sitting_of({"assessment_group": "Theory Exam", "sitting": "Aegrotat"}),
+			("Theory Exam", "Aegrotat"),
+		)
+		self.assertEqual(
+			sitting_of({"assessment_group": "Theory Exam", "sitting": "Main"}),
+			("Theory Exam", "Main"),
+		)
+		self.assertEqual(
+			sitting_of({"assessment_group": "Theory Exam"}), ("Theory Exam", "Main")
+		)
+
+	def test_the_old_naming_is_still_read_where_no_sitting_was_set(self):
+		"""A mark entered on the standard form is not prompted for a sitting, so an
+		AEGRO-named group still has to mean what it always meant."""
 		for group in ("AEGRO Theory Exam", "AEGROTAT Theory Exam", "AEGROTheory Exam"):
 			with self.subTest(group=group):
-				self.assertEqual(sitting_of(group), ("Theory Exam", True))
+				self.assertEqual(sitting_of({"assessment_group": group}), ("Theory Exam", "Aegrotat"))
 
-		self.assertEqual(sitting_of("aegro theory exam"), ("theory exam", True))
-		self.assertEqual(sitting_of("Theory Exam"), ("Theory Exam", False))
+		self.assertEqual(
+			sitting_of({"assessment_group": "Supplementary Exam"}),
+			("Supplementary Exam", "Supplementary"),
+		)
+
+	def test_an_aegrotat_mark_still_carrying_the_old_name_lands_on_the_right_assessment(self):
+		self.assertEqual(
+			sitting_of({"assessment_group": "AEGRO Theory Exam", "sitting": "Aegrotat"}),
+			("Theory Exam", "Aegrotat"),
+		)
+
+	def test_a_sitting_field_beats_the_old_naming(self):
+		"""A mark moved onto the assessment it stands in for still counts once."""
+		course = "ANH1201 - Anatomy"
+		criteria = scheme_for(course)
+		results = results_for(course, {row["assessment_group"]: 60 for row in criteria})
+		for result in results:
+			if result["assessment_group"] == "Theory Exam":
+				result["sitting"] = "Aegrotat"
+
+		computed = calculate_course_mark(criteria, results)
+		self.assertEqual(computed["missing"], [])
+		self.assertEqual(mark(criteria, results), "60")
+
+	def test_a_supplementary_mark_is_left_out_by_its_sitting(self):
+		course = "ANH1201 - Anatomy"
+		criteria = scheme_for(course)
+		results = results_for(course, {row["assessment_group"]: 60 for row in criteria})
+		results.append(
+			{
+				"course": course,
+				"assessment_group": "Theory Exam",
+				"sitting": "Supplementary",
+				"total_score": 99,
+				"maximum_score": 100,
+			}
+		)
+
+		# The supplementary mark is reported on its own, so the final mark is
+		# still the one the main sitting earned.
+		self.assertEqual(mark(criteria, results), "60")
 
 	def test_a_group_recorded_in_another_case_still_counts(self):
 		"""Casing of an assessment group must not quietly cost a student the mark."""

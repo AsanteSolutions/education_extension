@@ -9,6 +9,9 @@ from frappe.utils import now_datetime
 from education_extension.education_extension.doctype.course_mark_scheme.course_mark_scheme import (
 	get_scheme,
 )
+from education_extension.education_extension.doctype.marking_settings.marking_settings import (
+	order_students,
+)
 
 # The states the sheet moves through. Defined here as well as in the Workflow so
 # the controller can reason about them without reading the workflow back.
@@ -262,15 +265,17 @@ class CourseMarkSheet(Document):
 		return {"students": len(students), "entries": len(self.entries)}
 
 	def get_students(self):
-		"""Whose marks belong on this sheet: the student group's members when one
-		is named, otherwise everyone enrolled for the course this term."""
+		"""Whose marks belong on this sheet, in the order Marking Settings lists a
+		class in: the student group's members when one is named, otherwise everyone
+		enrolled for the course this term."""
 		if self.student_group:
-			return frappe.get_all(
-				"Student Group Student",
-				filters={"parent": self.student_group, "parenttype": "Student Group", "active": 1},
-				pluck="student",
-				order_by="idx",
-				limit_page_length=0,
+			return order_students(
+				frappe.get_all(
+					"Student Group Student",
+					filters={"parent": self.student_group, "parenttype": "Student Group", "active": 1},
+					pluck="student",
+					limit_page_length=0,
+				)
 			)
 
 		enrolled = frappe.get_all(
@@ -297,7 +302,7 @@ class CourseMarkSheet(Document):
 			)
 		)
 
-		return sorted({row.student for row in enrolled if row.name in taking_the_course})
+		return order_students({row.student for row in enrolled if row.name in taking_the_course})
 
 	# -- moderation ----------------------------------------------------------
 

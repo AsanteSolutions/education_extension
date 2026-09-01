@@ -34,7 +34,7 @@ def execute():
 				"fieldname": "custom_sitting",
 				"label": "Sitting",
 				"fieldtype": "Select",
-				"options": "Main\nSupplementary\nAegrotat\nSpecial",
+				"options": "Main\nSupplementary\nAegrotat",
 				"default": "Main",
 				"insert_after": "assessment_group",
 				"in_list_view": 1,

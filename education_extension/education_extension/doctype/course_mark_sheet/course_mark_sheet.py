@@ -49,7 +49,6 @@ ABSENT = "Absent"
 MAIN = "Main"
 SUPPLEMENTARY = "Supplementary"
 AEGROTAT = "Aegrotat"
-SPECIAL = "Special"
 
 # A supplementary is one paper covering the course, not a re-sit of each
 # assessment, which is why it is reported in a column of its own.
@@ -457,10 +456,7 @@ class CourseMarkSheet(Document):
 			return self.aegrotat_entries()
 
 		frappe.throw(
-			_(
-				"A {0} sitting is either a supplementary or an aegrotat one. Open the sheet as "
-				"whichever it is, so it knows who is sitting it and what they are sitting."
-			).format(frappe.bold(SPECIAL))
+			_("{0} is not a sitting a sheet can be generated for.").format(frappe.bold(self.sitting))
 		)
 
 	def supplementary_students(self):

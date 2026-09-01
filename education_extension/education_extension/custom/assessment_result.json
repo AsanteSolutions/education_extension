@@ -113,7 +113,7 @@
    "name": "Assessment Result-custom_sitting",
    "no_copy": 0,
    "non_negative": 0,
-   "options": "Main\nSupplementary\nAegrotat\nSpecial",
+   "options": "Main\nSupplementary\nAegrotat",
    "owner": "apile@asantesolutions.co.za",
    "permlevel": 0,
    "placeholder": null,

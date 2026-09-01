@@ -88,7 +88,7 @@
    "fieldname": "sitting",
    "fieldtype": "Select",
    "label": "Sitting",
-   "options": "Main\nSupplementary\nAegrotat\nSpecial",
+   "options": "Main\nSupplementary\nAegrotat",
    "reqd": 1
   },
   {

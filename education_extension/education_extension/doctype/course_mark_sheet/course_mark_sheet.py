@@ -709,6 +709,11 @@ class CourseMarkSheet(Document):
 				# A missed test or assignment scores nothing; there is no re-sitting
 				# for one. A missed exam contributes nothing at all, leaving the
 				# course incomplete until an aegrotat paper answers for it.
+				#
+				# UNDECIDED: a student who missed an exam and was not given the
+				# AEGRO comment sits here indefinitely — no aegrotat is coming and
+				# nothing scores them zero. Whether that should become a zero, an F,
+				# or wait on a QA ruling has not been settled. See the design note.
 				if entry.status == ABSENT and components.get(entry.assessment_group) == COURSEWORK:
 					score = 0
 				else:

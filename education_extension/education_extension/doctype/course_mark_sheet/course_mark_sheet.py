@@ -286,81 +286,107 @@ class CourseMarkSheet(Document):
 
 		moderated = self.moderation_method in (MODERATION_LINEAR, MODERATION_FLAT)
 
-		if self.sitting != MAIN:
-			# A re-sitting has no semester mark and no final mark: it is one or two
-			# papers, not the course. Showing the columns anyway would fill them
-			# with dashes and invite someone to read a missing mark as a failed one.
+		if self.sitting == SUPPLEMENTARY:
+			# One paper, reported on its own. A semester mark and a final mark
+			# belong to the course, and this sheet is not the course.
 			return {
-				"mode": "marks",
-				"criteria": self.sheet_assessments(),
-				"rows": self.resit_rows(),
+				"mode": "supplementary",
+				"criteria": [],
+				"rows": self.supplementary_rows(),
 				"moderated": moderated,
 			}
 
 		scheme = frappe.get_doc("Course Mark Scheme", self.mark_scheme)
+		criteria = [
+			{"assessment_group": row.assessment_group, "component": row.component}
+			for row in scheme.criteria
+		]
+
+		if self.sitting == AEGROTAT:
+			# An aegrotat paper only makes sense read against the course it belongs
+			# to, so the rest of the marks come from the main sheet and the ones
+			# sat here are pointed out.
+			rows, sourced_here = self.aegrotat_rows(scheme)
+			for row in rows:
+				row["aegrotat"] = sorted(sourced_here.get(row["student"], ()))
+			return {"mode": "aegrotat", "criteria": criteria, "rows": rows, "moderated": moderated}
+
 		return {
-			"mode": "full",
-			"criteria": [
-				{"assessment_group": row.assessment_group, "component": row.component}
-				for row in scheme.criteria
-			],
+			"mode": "main",
+			"criteria": criteria,
 			"rows": review_rows(self.course, self.academic_term, scheme.criteria, by_student),
 			"moderated": moderated,
 		}
 
-	def sheet_assessments(self):
-		"""The assessments this sheet actually covers, in the order they appear."""
-		seen, groups = set(), []
-		for entry in self.entries:
-			if entry.assessment_group not in seen:
-				seen.add(entry.assessment_group)
-				groups.append({"assessment_group": entry.assessment_group, "component": "Examination"})
-		return groups
-
-	def resit_rows(self):
-		"""A row per student on a re-sit sheet: what they sat and what they got.
-
-		Deliberately not run through the mark calculation — the marks on this sheet
-		belong to the course's result, which the main sheet and the reports work
-		out together, not to this sheet on its own.
-		"""
+	def supplementary_rows(self):
+		"""A row per student sitting the supplementary: their mark and its comment."""
 		from education_extension.education_extension.doctype.marking_settings.marking_settings import (
 			order_students,
 		)
 		from education_extension.education_extension.marking import _course_remarks, _student_names
 
-		by_student = {}
+		marks = {}
 		for entry in self.entries:
 			score = self.effective_score(entry)
-			by_student.setdefault(entry.student, {})[entry.assessment_group] = (
-				round_half_up(score / (entry.maximum_score or 100) * 100)
+			marks[entry.student] = (
+				f"{round_half_up(score / (entry.maximum_score or 100) * 100)}%"
 				if score is not None
 				else ("Absent" if entry.status == ABSENT else "-")
 			)
 
-		comments = _course_remarks(self.course, self.academic_term, "Academic Remark", "remark")
-		supp_comments = _course_remarks(
+		comments = _course_remarks(
 			self.course, self.academic_term, "Supplementary Academic Remark", "supp_remark"
 		)
-		names = _student_names(by_student)
+		names = _student_names(marks)
 
 		return [
 			{
 				"student": student,
 				"student_name": names.get(student, student),
-				"scores": by_student[student],
-				"dp": "",
-				"final_mark": "",
-				"supplementary": "",
-				"remark": comments.get(student, ""),
-				"supp_remark": supp_comments.get(student, ""),
-				"missing": [
-					group for group, value in by_student[student].items() if value == "-"
-				],
-				"failed_subminima": [],
+				"supplementary": marks[student],
+				"supp_remark": comments.get(student, ""),
+				"missing": [] if marks[student] != "-" else ["Supplementary Exam"],
 			}
-			for student in order_students(list(by_student))
+			for student in order_students(list(marks))
 		]
+
+	def aegrotat_rows(self, scheme):
+		"""The course as it stands once this sheet's papers are counted.
+
+		The other marks come from the main sheet, because an aegrotat paper is only
+		meaningful as part of the result it completes. The aegrotat marks displace
+		the ones they stand in for through the rule that already governs that, so
+		nothing here decides precedence a second time.
+		"""
+		from education_extension.education_extension.marking import review_rows
+
+		main = frappe.get_all(
+			"Course Mark Sheet",
+			filters={
+				"course": self.course,
+				"academic_term": self.academic_term,
+				"sitting": MAIN,
+				"docstatus": ["<", 2],
+			},
+			pluck="name",
+			limit=1,
+		)
+
+		by_student = {}
+		if main:
+			for row in frappe.get_doc("Course Mark Sheet", main[0]).marks():
+				by_student.setdefault(row["student"], []).append(row)
+
+		sourced_here = {}
+		for row in self.marks():
+			by_student.setdefault(row["student"], []).append(row)
+			sourced_here.setdefault(row["student"], set()).add(row["assessment_group"])
+
+		# Only the students sitting this one, not the whole cohort of the main sheet.
+		mine = {entry.student for entry in self.entries}
+		by_student = {student: rows for student, rows in by_student.items() if student in mine}
+
+		return review_rows(self.course, self.academic_term, scheme.criteria, by_student), sourced_here
 
 	@frappe.whitelist()
 	def generate_entries(self):
@@ -631,6 +657,7 @@ class CourseMarkSheet(Document):
 					"student": entry.student,
 					"course": self.course,
 					"assessment_group": entry.assessment_group,
+					"sitting": self.sitting,
 					"total_score": score,
 					"maximum_score": entry.maximum_score or 100,
 				}

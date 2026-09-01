@@ -6,6 +6,9 @@ from frappe.tests.utils import FrappeTestCase
 
 from education_extension.education_extension.doctype.course_mark_sheet.course_mark_sheet import (
 	ABSENT,
+	SPECIAL,
+	SUPPLEMENTARY_COMMENT,
+	SUPPLEMENTARY_GROUP,
 	MARKED,
 	MODERATION_FLAT,
 	MODERATION_LINEAR,
@@ -128,3 +131,29 @@ class TestCourseMarkSheet(FrappeTestCase):
 
 	def test_an_assessment_named_like_a_number_is_keyed_the_same_way(self):
 		self.assertEqual(entry_key("S1", 1), entry_key("S1", "1"))
+
+	def test_a_special_sitting_will_not_generate(self):
+		"""Special covers both kinds of re-sitting, so it cannot say who is sitting
+		what. The sheet has to be opened as the one it actually is."""
+		doc = sheet_with([])
+		doc.sitting = SPECIAL
+		self.assertRaises(frappe.ValidationError, doc.wanted_entries)
+
+	def test_a_supplementary_is_one_paper_for_the_course(self):
+		"""Not a re-sit of each assessment, which is why the report gives it a
+		single column."""
+		self.assertEqual(SUPPLEMENTARY_GROUP, "Supplementary Exam")
+		self.assertEqual(SUPPLEMENTARY_COMMENT, "SUPP")
+
+	def test_the_assessments_on_a_sheet_keep_their_order_without_repeating(self):
+		doc = sheet_with(
+			[
+				("S1", "Theory Exam", MARKED, 60, 0),
+				("S2", "Theory Exam", MARKED, 55, 0),
+				("S2", "Practical Exam", MARKED, 70, 0),
+			]
+		)
+		self.assertEqual(
+			[row["assessment_group"] for row in doc.sheet_assessments()],
+			["Theory Exam", "Practical Exam"],
+		)

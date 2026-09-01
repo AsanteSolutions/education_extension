@@ -338,6 +338,47 @@ def get_remark_codes():
 	return REMARK_CODES
 
 
+@frappe.whitelist()
+def set_course_remark(student, course, academic_year, academic_term, comment, supplementary=0):
+	"""Record QA's comment on a result, creating it or replacing what was there.
+
+	Server-side because the client cannot do it correctly: these records are
+	submittable, so inserting one leaves a draft that nothing reads, and writing
+	to a submitted one needs the field to allow it. Both are handled here so a
+	comment either lands where the reports look or fails loudly.
+	"""
+	frappe.only_for(("Academics User", "Education Manager", "System Manager"))
+
+	supplementary = frappe.parse_json(supplementary) if isinstance(supplementary, str) else supplementary
+	doctype = "Supplementary Academic Remark" if supplementary else "Academic Remark"
+	fieldname = "supp_remark" if supplementary else "remark"
+
+	comment = (comment or "").strip()
+	if comment and comment not in REMARK_CODES:
+		frappe.throw(_("{0} is not a comment code.").format(frappe.bold(comment)))
+
+	keys = {
+		"student": student,
+		"course": course,
+		"academic_year": academic_year,
+		"academic_term": academic_term,
+	}
+	existing = frappe.get_all(doctype, filters=dict(keys, docstatus=["<", 2]), pluck="name", limit=1)
+
+	if not existing:
+		if not comment:
+			return None
+		# These doctypes require the comment, so there is no such thing as an
+		# empty one to create.
+		record = frappe.get_doc(dict(keys, doctype=doctype, **{fieldname: comment}))
+		record.insert()
+		record.submit()
+		return record.name
+
+	frappe.db.set_value(doctype, existing[0], fieldname, comment)
+	return existing[0]
+
+
 def get_course_results(course, academic_term):
 	"""Every student's marks for one course in a term, grouped by student.
 
@@ -398,23 +439,37 @@ def get_course_results(course, academic_term):
 
 
 def course_marks(course, academic_year, academic_term):
-	"""One row per student for a whole course, as a QA reviewer needs to read it.
+	"""One row per student for a whole course, from wherever its marks live.
 
-	Returns the scheme's assessments in the order the scheme lists them, so the
-	columns follow the course rather than a fixed set, and a row per student
-	carrying each score, the semester mark, the final mark, the supplementary
-	mark and the stored comments.
+	What the Course Results report shows. A sheet still in review is not read
+	here — it is not approved, so it is not yet the record — which is why the
+	sheet builds its own QA view from its own entries through review_rows below.
 	"""
 	from education_extension.education_extension.doctype.course_mark_scheme.course_mark_scheme import (
 		get_scheme,
 	)
-	from education_extension.education_extension.doctype.marking_settings.marking_settings import (
-		order_students,
-	)
 
 	scheme = get_scheme(course, academic_year)
 	criteria = list(scheme.criteria) if scheme else []
-	by_student = get_course_results(course, academic_term)
+
+	return {
+		"criteria": criteria,
+		"rows": review_rows(course, academic_term, criteria, get_course_results(course, academic_term)),
+		"scheme": scheme.name if scheme else None,
+	}
+
+
+def review_rows(course, academic_term, criteria, by_student):
+	"""A row per student in the shape a reviewer reads: the score for each
+	assessment, the semester mark, the final mark, the supplementary mark and the
+	stored comments.
+
+	Shared so the report and the sheet's own QA view cannot drift into showing
+	the same course two different ways.
+	"""
+	from education_extension.education_extension.doctype.marking_settings.marking_settings import (
+		order_students,
+	)
 
 	comments = _course_remarks(course, academic_term, "Academic Remark", "remark")
 	supp_comments = _course_remarks(
@@ -441,7 +496,6 @@ def course_marks(course, academic_year, academic_term):
 			else calculate_final_results_detailed(results).get(course)
 		)
 		complete = computed and computed["dp_complete"] and computed["exams_complete"]
-		supplementary = _supplementary_for(results)
 
 		rows.append(
 			{
@@ -450,7 +504,7 @@ def course_marks(course, academic_year, academic_term):
 				"scores": scores,
 				"dp": round_half_up(computed["dp"]) if computed and computed["dp_complete"] else "-",
 				"final_mark": round_half_up(computed["final_mark"]) if complete else "-",
-				"supplementary": supplementary,
+				"supplementary": _supplementary_for(results),
 				"remark": comments.get(student, ""),
 				"supp_remark": supp_comments.get(student, ""),
 				"missing": computed["missing"] if computed else [],
@@ -458,7 +512,7 @@ def course_marks(course, academic_year, academic_term):
 			}
 		)
 
-	return {"criteria": criteria, "rows": rows, "scheme": scheme.name if scheme else None}
+	return rows
 
 
 def _supplementary_for(results):

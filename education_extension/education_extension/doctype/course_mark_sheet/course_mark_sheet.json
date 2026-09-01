@@ -18,6 +18,8 @@
   "amended_from",
   "section_break_entries",
   "mark_entry",
+  "section_break_qa",
+  "qa_review",
   "section_break_all_entries",
   "entries",
   "section_break_moderation",
@@ -138,6 +140,16 @@
    "fieldname": "mark_entry",
    "fieldtype": "HTML",
    "label": "Mark Entry"
+  },
+  {
+   "fieldname": "section_break_qa",
+   "fieldtype": "Section Break",
+   "label": "QA Review"
+  },
+  {
+   "fieldname": "qa_review",
+   "fieldtype": "HTML",
+   "label": "QA Review"
   },
   {
    "collapsible": 1,

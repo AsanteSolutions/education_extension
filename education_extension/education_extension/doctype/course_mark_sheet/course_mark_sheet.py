@@ -242,6 +242,40 @@ class CourseMarkSheet(Document):
 			"outstanding": self.outstanding_count(),
 		}
 
+	# Once the marks are in, the sheet stops being a grid to fill and becomes a
+	# set of results to read. These are the states where that is what it is.
+	REVIEW_STATES = (SUBMITTED_FOR_CHECKING, CHECKED, MODERATED, APPROVED, RELEASED)
+
+	@frappe.whitelist()
+	def qa_review(self):
+		"""The sheet as a reviewer reads it: a row per student with every score,
+		the semester mark, the final mark and the comments.
+
+		Built from the sheet's own entries rather than from where marks normally
+		come from, because a sheet under review is not approved and so is not yet
+		the record. The rows are assembled by the same function the Course Results
+		report uses, so checking a sheet and reporting on it cannot show the same
+		course two different ways.
+		"""
+		from education_extension.education_extension.marking import review_rows
+
+		scheme = frappe.get_doc("Course Mark Scheme", self.mark_scheme)
+
+		by_student = {}
+		for entry in self.entries:
+			by_student.setdefault(entry.student, [])
+		for row in self.marks():
+			by_student[row["student"]].append(row)
+
+		return {
+			"criteria": [
+				{"assessment_group": row.assessment_group, "component": row.component}
+				for row in scheme.criteria
+			],
+			"rows": review_rows(self.course, self.academic_term, scheme.criteria, by_student),
+			"moderated": self.moderation_method in (MODERATION_LINEAR, MODERATION_FLAT),
+		}
+
 	@frappe.whitelist()
 	def generate_entries(self):
 		"""Build a row per student per assessment from the course's scheme.

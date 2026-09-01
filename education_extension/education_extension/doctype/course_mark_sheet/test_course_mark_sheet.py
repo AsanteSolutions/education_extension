@@ -11,7 +11,6 @@ from education_extension.education_extension.doctype.course_mark_sheet.course_ma
 	AEGROTAT,
 	AEGROTAT_COMMENT,
 	COURSEWORK,
-	SPECIAL,
 	SUPPLEMENTARY_COMMENT,
 	SUPPLEMENTARY_GROUP,
 	MARKED,
@@ -137,11 +136,10 @@ class TestCourseMarkSheet(FrappeTestCase):
 	def test_an_assessment_named_like_a_number_is_keyed_the_same_way(self):
 		self.assertEqual(entry_key("S1", 1), entry_key("S1", "1"))
 
-	def test_a_special_sitting_will_not_generate(self):
-		"""Special covers both kinds of re-sitting, so it cannot say who is sitting
-		what. The sheet has to be opened as the one it actually is."""
+	def test_a_sitting_the_sheet_does_not_know_will_not_generate(self):
+		"""Rather than quietly producing an empty sheet, or the main sitting's roll."""
 		doc = sheet_with([])
-		doc.sitting = SPECIAL
+		doc.sitting = "Something Else"
 		self.assertRaises(frappe.ValidationError, doc.wanted_entries)
 
 	def test_a_supplementary_is_one_paper_for_the_course(self):

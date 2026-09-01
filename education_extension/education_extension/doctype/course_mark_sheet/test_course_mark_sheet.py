@@ -1,12 +1,16 @@
 # Copyright (c) 2026, Asante Solutions and contributors
 # For license information, please see license.txt
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from education_extension.education_extension.doctype.course_mark_sheet.course_mark_sheet import (
 	ABSENT,
 	AEGROTAT,
+	AEGROTAT_COMMENT,
+	COURSEWORK,
 	SPECIAL,
 	SUPPLEMENTARY_COMMENT,
 	SUPPLEMENTARY_GROUP,
@@ -153,3 +157,25 @@ class TestCourseMarkSheet(FrappeTestCase):
 		doc = sheet_with([("S1", "Theory Exam", MARKED, 60, 0)])
 		doc.sitting = AEGROTAT
 		self.assertEqual(doc.marks()[0]["sitting"], AEGROTAT)
+
+	def test_a_missed_test_scores_nothing_rather_than_leaving_a_hole(self):
+		"""There is no re-sitting for a test, so an absence from one is a zero and
+		the semester mark can still be worked out."""
+		doc = sheet_with([("S1", "Test 1", ABSENT, 0, 0)])
+		with patch.object(doc, "assessment_components", return_value={"Test 1": COURSEWORK}):
+			marks = doc.marks()
+
+		self.assertEqual(len(marks), 1)
+		self.assertEqual(marks[0]["total_score"], 0)
+
+	def test_a_missed_exam_leaves_the_course_incomplete(self):
+		"""It waits for an aegrotat paper rather than being scored zero, because
+		one may still be sat."""
+		doc = sheet_with([("S1", "Theory Exam", ABSENT, 0, 0)])
+		with patch.object(doc, "assessment_components", return_value={"Theory Exam": "Examination"}):
+			self.assertEqual(doc.marks(), [])
+
+	def test_an_aegrotat_needs_the_comment_not_just_an_absence(self):
+		"""A student can miss a paper without producing the documentation that
+		entitles them to sit it again."""
+		self.assertEqual(AEGROTAT_COMMENT, "AEGRO")

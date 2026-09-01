@@ -55,8 +55,15 @@ SPECIAL = "Special"
 # assessment, which is why it is reported in a column of its own.
 SUPPLEMENTARY_GROUP = "Supplementary Exam"
 
-# Who is entitled to a supplementary: QA says so with this comment.
+# Who is entitled to a re-sitting: QA says so with a comment. Being absent is
+# not enough on its own — an aegrotat needs documentation, and it is QA who has
+# seen it.
 SUPPLEMENTARY_COMMENT = "SUPP"
+AEGROTAT_COMMENT = "AEGRO"
+
+# Only exams are sat again. A missed test or assignment scores nothing, because
+# there is no second chance at one.
+COURSEWORK = "Coursework"
 
 
 def entry_key(student, assessment_group):
@@ -510,15 +517,41 @@ class CourseMarkSheet(Document):
 				).format(frappe.bold(self.course), frappe.bold(self.academic_term))
 			)
 
+		entitled = set(
+			frappe.get_all(
+				"Academic Remark",
+				filters={
+					"course": self.course,
+					"academic_term": self.academic_term,
+					"remark": AEGROTAT_COMMENT,
+					"docstatus": 1,
+				},
+				pluck="student",
+				limit_page_length=0,
+			)
+		)
+		if not entitled:
+			return []
+
 		absences = frappe.get_all(
 			"Course Mark Sheet Entry",
 			fields=["student", "assessment_group"],
-			filters={"parent": main[0], "parenttype": "Course Mark Sheet", "status": ABSENT},
+			filters={
+				"parent": main[0],
+				"parenttype": "Course Mark Sheet",
+				"status": ABSENT,
+				"student": ["in", list(entitled)],
+			},
 			limit_page_length=0,
 		)
 
+		# Only exams are sat again; a missed test already counts as zero.
+		components = self.assessment_components()
+
 		by_student = {}
 		for row in absences:
+			if components.get(row.assessment_group) == COURSEWORK:
+				continue
 			by_student.setdefault(row.student, []).append(row.assessment_group)
 
 		return [
@@ -533,8 +566,14 @@ class CourseMarkSheet(Document):
 				frappe.bold(SUPPLEMENTARY_COMMENT), frappe.bold(self.course), frappe.bold(self.academic_term)
 			)
 		if self.sitting == AEGROTAT:
-			return _("Nobody was marked absent on the main sheet for {0} in {1}.").format(
-				frappe.bold(self.course), frappe.bold(self.academic_term)
+			return _(
+				"Nobody marked {0} for {1} in {2} missed an exam. Being absent is not enough on "
+				"its own — an aegrotat needs the comment, which is how QA records that the "
+				"documentation was seen."
+			).format(
+				frappe.bold(AEGROTAT_COMMENT),
+				frappe.bold(self.course),
+				frappe.bold(self.academic_term),
 			)
 		return _("No students are enrolled for {0} in {1}.").format(
 			frappe.bold(self.course), frappe.bold(self.academic_term)
@@ -639,6 +678,20 @@ class CourseMarkSheet(Document):
 
 	# -- what the calculation reads -----------------------------------------
 
+	def assessment_components(self):
+		"""Which half of the mark each assessment belongs to, from the scheme."""
+		if not self.mark_scheme:
+			return {}
+		return {
+			row.assessment_group: row.component
+			for row in frappe.get_all(
+				"Course Mark Scheme Criterion",
+				fields=["assessment_group", "component"],
+				filters={"parent": self.mark_scheme, "parenttype": "Course Mark Scheme"},
+				limit_page_length=0,
+			)
+		}
+
 	def marks(self):
 		"""The sheet's marks in the shape the calculation reads results in.
 
@@ -647,11 +700,19 @@ class CourseMarkSheet(Document):
 		and wants an Assessment Plan behind it, so writing one from here would mean
 		threading plans through the sheet and keeping the same mark in two places.
 		"""
+		components = self.assessment_components()
+
 		rows = []
 		for entry in self.entries:
 			score = self.effective_score(entry)
 			if score is None:
-				continue
+				# A missed test or assignment scores nothing; there is no re-sitting
+				# for one. A missed exam contributes nothing at all, leaving the
+				# course incomplete until an aegrotat paper answers for it.
+				if entry.status == ABSENT and components.get(entry.assessment_group) == COURSEWORK:
+					score = 0
+				else:
+					continue
 			rows.append(
 				{
 					"student": entry.student,

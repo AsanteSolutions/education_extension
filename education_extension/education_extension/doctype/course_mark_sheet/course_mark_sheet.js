@@ -385,80 +385,136 @@ function render_qa_review(frm) {
 
 function draw_qa_table(frm, $wrapper, data) {
 	const escape = frappe.utils.escape_html
-	// A re-sitting has no semester or final mark, so those columns are left out
-	// rather than shown empty.
-	const full = data.mode !== 'marks'
-	const coursework = full ? data.criteria.filter((c) => c.component === 'Coursework') : data.criteria
-	const examination = full ? data.criteria.filter((c) => c.component !== 'Coursework') : []
 	const editable = frm.doc.docstatus === 0
+	const mode = data.mode
+
+	// A supplementary is one paper: its mark and its comment, and nothing that
+	// belongs to the course as a whole.
+	if (mode === 'supplementary') {
+		return draw_supplementary_table(frm, $wrapper, data, editable)
+	}
+
+	// Main and aegrotat read the same, because an aegrotat paper is only
+	// meaningful as part of the result it completes. The difference is that the
+	// marks sat on this sheet are pointed out.
+	const coursework = data.criteria.filter((c) => c.component === 'Coursework')
+	const examination = data.criteria.filter((c) => c.component !== 'Coursework')
+	const aegrotat = mode === 'aegrotat'
 
 	const head = []
 		.concat(
 			['<th style="min-width:96px">' + __('Student') + '</th>'],
 			['<th style="min-width:200px">' + __('Name') + '</th>'],
 			coursework.map((c) => '<th class="text-center">' + escape(c.assessment_group) + '</th>'),
-			full ? ['<th class="text-center">' + __('Semester Mark') + '</th>'] : [],
+			['<th class="text-center">' + __('Semester Mark') + '</th>'],
 			examination.map((c) => '<th class="text-center">' + escape(c.assessment_group) + '</th>'),
-			full
-				? [
-						'<th class="text-center">' + __('Final Mark') + '</th>',
-						'<th class="text-center">' + __('Supp Mark') + '</th>',
-					]
-				: [],
 			[
+				'<th class="text-center">' + __('Final Mark') + '</th>',
 				'<th class="text-center">' + __('Remark') + '</th>',
-				'<th class="text-center">' + __('Supp Remark') + '</th>',
 			],
 		)
 		.join('')
 
-	const cell = (value) =>
-		value === '-'
-			? '<td class="text-center text-muted">-</td>'
-			: '<td class="text-center">' + escape(String(value)) + '</td>'
-
-	const comment_cell = (student, value, supplementary) =>
-		'<td class="text-center">' +
-		'<a class="qa-comment" data-student="' + escape(student) + '"' +
-		' data-supplementary="' + (supplementary ? 1 : 0) + '">' +
-		(value ? '<b>' + escape(value) + '</b>' : (editable ? __('add') : '—')) +
-		'</a></td>'
+	const cell = (value, sat_here) => {
+		if (value === '-') return '<td class="text-center text-muted">-</td>'
+		const shown = escape(String(value))
+		return sat_here
+			? '<td class="text-center" style="background:var(--bg-light-blue)" title="' +
+					__('Sat at the aegrotat sitting') +
+					'"><b>' + shown + '</b> <span class="text-muted small">A</span></td>'
+			: '<td class="text-center">' + shown + '</td>'
+	}
 
 	const body = data.rows
 		.map((row) => {
-			// A student still missing a mark is the thing a checker is looking for,
-			// so the row says so rather than leaving them to spot a dash.
+			const sat = new Set(row.aegrotat || [])
 			const outstanding = row.missing && row.missing.length
 			return (
 				'<tr' + (outstanding ? ' class="text-danger"' : '') + '>' +
 				'<td class="text-muted small" style="white-space:nowrap">' + escape(row.student) + '</td>' +
 				'<td style="white-space:nowrap">' + escape(row.student_name) +
 				(outstanding
-					? ' <span class="text-danger small">(' + __('missing {0}', [escape(row.missing.join(', '))]) + ')</span>'
+					? ' <span class="text-danger small">(' +
+						__('missing {0}', [escape(row.missing.join(', '))]) + ')</span>'
 					: '') +
 				'</td>' +
-				coursework.map((c) => cell(row.scores[c.assessment_group])).join('') +
-				(full ? cell(row.dp) : '') +
-				examination.map((c) => cell(row.scores[c.assessment_group])).join('') +
-				(full ? cell(row.final_mark) + cell(row.supplementary) : '') +
-				comment_cell(row.student, row.remark, false) +
-				comment_cell(row.student, row.supp_remark, true) +
+				coursework
+					.map((c) => cell(row.scores[c.assessment_group], sat.has(c.assessment_group)))
+					.join('') +
+				cell(row.dp) +
+				examination
+					.map((c) => cell(row.scores[c.assessment_group], sat.has(c.assessment_group)))
+					.join('') +
+				cell(row.final_mark) +
+				comment_cell(row.student, row.remark, false, editable) +
 				'</tr>'
 			)
 		})
 		.join('')
 
-	const commented = data.rows.filter((r) => r.remark).length
-	const incomplete = data.rows.filter((r) => r.missing && r.missing.length).length
-	const what = full ? __('students') : __('sitting this')
+	const note = aegrotat
+		? __('Marks sat at this sitting are shaded; the rest come from the main sheet.')
+		: data.moderated
+			? __('Showing moderated marks.')
+			: ''
 
-	$wrapper.html(
+	$wrapper.html(qa_shell(data, head, body, note))
+	bind_comment_links(frm, $wrapper, editable)
+}
+
+function draw_supplementary_table(frm, $wrapper, data, editable) {
+	const escape = frappe.utils.escape_html
+	const head =
+		'<th style="min-width:96px">' + __('Student') + '</th>' +
+		'<th style="min-width:200px">' + __('Name') + '</th>' +
+		'<th class="text-center">' + __('Supplementary Mark') + '</th>' +
+		'<th class="text-center">' + __('Supp Remark') + '</th>'
+
+	const body = data.rows
+		.map((row) => {
+			const outstanding = row.missing && row.missing.length
+			return (
+				'<tr' + (outstanding ? ' class="text-danger"' : '') + '>' +
+				'<td class="text-muted small" style="white-space:nowrap">' + escape(row.student) + '</td>' +
+				'<td style="white-space:nowrap">' + escape(row.student_name) + '</td>' +
+				(row.supplementary === '-'
+					? '<td class="text-center text-muted">-</td>'
+					: '<td class="text-center">' + escape(String(row.supplementary)) + '</td>') +
+				comment_cell(row.student, row.supp_remark, true, editable) +
+				'</tr>'
+			)
+		})
+		.join('')
+
+	$wrapper.html(qa_shell(data, head, body, ''))
+	bind_comment_links(frm, $wrapper, editable)
+}
+
+function comment_cell(student, value, supplementary, editable) {
+	return (
+		'<td class="text-center">' +
+		'<a class="qa-comment" data-student="' + frappe.utils.escape_html(student) + '"' +
+		' data-supplementary="' + (supplementary ? 1 : 0) + '">' +
+		(value
+			? '<b>' + frappe.utils.escape_html(value) + '</b>'
+			: editable
+				? __('add')
+				: '—') +
+		'</a></td>'
+	)
+}
+
+function qa_shell(data, head, body, note) {
+	const commented = data.rows.filter((r) => r.remark || r.supp_remark).length
+	const outstanding = data.rows.filter((r) => r.missing && r.missing.length).length
+
+	return (
 		'<div class="qa-review">' +
 			'<div class="text-muted small" style="margin-bottom:8px">' +
-				__('{0} {1} &middot; {2} commented &middot; {3} outstanding', [
-					data.rows.length, what, commented, incomplete,
+				__('{0} students &middot; {1} commented &middot; {2} outstanding', [
+					data.rows.length, commented, outstanding,
 				]) +
-				(data.moderated ? ' &middot; <b>' + __('showing moderated marks') + '</b>' : '') +
+				(note ? ' &middot; ' + note : '') +
 			'</div>' +
 			'<div style="overflow:auto;max-height:60vh;border:1px solid var(--border-color)">' +
 				'<table class="table table-bordered table-condensed" style="margin:0">' +
@@ -467,9 +523,11 @@ function draw_qa_table(frm, $wrapper, data) {
 					'</tr></thead><tbody>' + body + '</tbody>' +
 				'</table>' +
 			'</div>' +
-		'</div>',
+		'</div>'
 	)
+}
 
+function bind_comment_links(frm, $wrapper, editable) {
 	$wrapper.on('click', '.qa-comment', function () {
 		if (!editable) return
 		edit_comment(frm, $(this).attr('data-student'), $(this).attr('data-supplementary') === '1')

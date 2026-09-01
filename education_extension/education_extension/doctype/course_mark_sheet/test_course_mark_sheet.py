@@ -6,6 +6,7 @@ from frappe.tests.utils import FrappeTestCase
 
 from education_extension.education_extension.doctype.course_mark_sheet.course_mark_sheet import (
 	ABSENT,
+	AEGROTAT,
 	SPECIAL,
 	SUPPLEMENTARY_COMMENT,
 	SUPPLEMENTARY_GROUP,
@@ -145,15 +146,10 @@ class TestCourseMarkSheet(FrappeTestCase):
 		self.assertEqual(SUPPLEMENTARY_GROUP, "Supplementary Exam")
 		self.assertEqual(SUPPLEMENTARY_COMMENT, "SUPP")
 
-	def test_the_assessments_on_a_sheet_keep_their_order_without_repeating(self):
-		doc = sheet_with(
-			[
-				("S1", "Theory Exam", MARKED, 60, 0),
-				("S2", "Theory Exam", MARKED, 55, 0),
-				("S2", "Practical Exam", MARKED, 70, 0),
-			]
-		)
-		self.assertEqual(
-			[row["assessment_group"] for row in doc.sheet_assessments()],
-			["Theory Exam", "Practical Exam"],
-		)
+	def test_a_sheet_reports_the_sitting_its_marks_belong_to(self):
+		"""Merging an aegrotat sheet into the main one relies on this: without the
+		sitting on each mark, the main one would win and the aegrotat paper would
+		count for nothing."""
+		doc = sheet_with([("S1", "Theory Exam", MARKED, 60, 0)])
+		doc.sitting = AEGROTAT
+		self.assertEqual(doc.marks()[0]["sitting"], AEGROTAT)

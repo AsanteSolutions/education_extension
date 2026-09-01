@@ -222,36 +222,66 @@ def get_assessment_results(student, academic_term):
 	return by_course
 
 
+# A missed coursework assessment scores nothing, because there is no re-sitting
+# for one — only exams are sat again. A missed exam is left out entirely, so the
+# course stays incomplete until an aegrotat paper answers for it.
+COURSEWORK_COMPONENT = "Coursework"
+
+
+def _sheet_mark_rows(condition, params):
+	"""Marks from approved Course Mark Sheets, with absences resolved.
+
+	The component comes from the scheme the sheet was stamped with, because
+	whether an absence scores zero or leaves a hole depends on which half of the
+	mark the assessment belongs to.
+	"""
+	return frappe.db.sql(
+		"""
+		select entry.student, sheet.course, entry.assessment_group, entry.status,
+		       entry.raw_score, entry.moderated_score, entry.maximum_score,
+		       sheet.moderation_method, sheet.sitting, criterion.component
+		from `tabCourse Mark Sheet Entry` entry
+		join `tabCourse Mark Sheet` sheet on sheet.name = entry.parent
+		left join `tabCourse Mark Scheme Criterion` criterion
+		       on criterion.parent = sheet.mark_scheme
+		      and criterion.assessment_group = entry.assessment_group
+		where sheet.docstatus = 1
+		  and entry.status in ('Marked', 'Absent')
+		  and {condition}
+		""".format(condition=condition),
+		params,
+		as_dict=True,
+	)
+
+
+def _sheet_mark(row):
+	"""The score a sheet row contributes, or None where it contributes nothing."""
+	if row.status == "Marked":
+		moderated = row.moderation_method in ("Linear Scale", "Flat Adjustment")
+		return row.moderated_score if moderated else row.raw_score
+	return 0 if row.component == COURSEWORK_COMPONENT else None
+
+
 def get_sheet_marks(student, academic_term):
 	"""A student's marks from approved Course Mark Sheets, grouped by course.
 
 	Moderation is applied here rather than by the reader: a moderated sheet
 	reports the moderated score, and the raw one stays on the sheet untouched.
 	"""
-	rows = frappe.db.sql(
-		"""
-		select sheet.course, entry.assessment_group, entry.raw_score, entry.moderated_score,
-		       entry.maximum_score, sheet.moderation_method, sheet.sitting
-		from `tabCourse Mark Sheet Entry` entry
-		join `tabCourse Mark Sheet` sheet on sheet.name = entry.parent
-		where sheet.docstatus = 1
-		  and sheet.academic_term = %(academic_term)s
-		  and entry.student = %(student)s
-		  and entry.status = 'Marked'
-		""",
-		{"student": student, "academic_term": academic_term},
-		as_dict=True,
-	)
-
 	by_course = {}
-	for row in rows:
-		moderated = row.moderation_method in ("Linear Scale", "Flat Adjustment")
+	for row in _sheet_mark_rows(
+		"sheet.academic_term = %(academic_term)s and entry.student = %(student)s",
+		{"student": student, "academic_term": academic_term},
+	):
+		score = _sheet_mark(row)
+		if score is None:
+			continue
 		by_course.setdefault(row.course, []).append(
 			{
 				"course": row.course,
 				"assessment_group": row.assessment_group,
 				"sitting": row.sitting,
-				"total_score": row.moderated_score if moderated else row.raw_score,
+				"total_score": score,
 				"maximum_score": row.maximum_score or 100,
 			}
 		)
@@ -405,32 +435,22 @@ def get_course_results(course, academic_term):
 		row["course"] = course
 		by_student.setdefault(result.student, []).append(row)
 
-	sheet_rows = frappe.db.sql(
-		"""
-		select entry.student, entry.assessment_group, entry.raw_score, entry.moderated_score,
-		       entry.maximum_score, sheet.moderation_method, sheet.sitting
-		from `tabCourse Mark Sheet Entry` entry
-		join `tabCourse Mark Sheet` sheet on sheet.name = entry.parent
-		where sheet.docstatus = 1
-		  and sheet.course = %(course)s
-		  and sheet.academic_term = %(academic_term)s
-		  and entry.status = 'Marked'
-		""",
-		{"course": course, "academic_term": academic_term},
-		as_dict=True,
-	)
-
 	# Wholesale per student, for the same reason the by-student version does it:
 	# half a course's marks from each source would be nobody's answer.
 	from_sheet = {}
-	for row in sheet_rows:
-		moderated = row.moderation_method in ("Linear Scale", "Flat Adjustment")
+	for row in _sheet_mark_rows(
+		"sheet.course = %(course)s and sheet.academic_term = %(academic_term)s",
+		{"course": course, "academic_term": academic_term},
+	):
+		score = _sheet_mark(row)
+		if score is None:
+			continue
 		from_sheet.setdefault(row.student, []).append(
 			{
 				"course": course,
 				"assessment_group": row.assessment_group,
 				"sitting": row.sitting,
-				"total_score": row.moderated_score if moderated else row.raw_score,
+				"total_score": score,
 				"maximum_score": row.maximum_score or 100,
 			}
 		)

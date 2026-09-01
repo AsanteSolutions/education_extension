@@ -313,6 +313,194 @@ def student_marks(student, academic_year, academic_term):
 	return marks
 
 
+# The comments QA can put against a result. A fixed list rather than free text:
+# they are read off the printed report's legend, and a typo makes one invisible.
+REMARK_CODES = [
+	"P",
+	"PD",
+	"C",
+	"F",
+	"FSUB",
+	"NSM",
+	"DISC",
+	"SUPP",
+	"AEGRO",
+	"PS",
+	"FS",
+	"PSE",
+	"FSE",
+]
+
+
+@frappe.whitelist()
+def get_remark_codes():
+	"""So the QA view offers the same list the report legend explains."""
+	return REMARK_CODES
+
+
+def get_course_results(course, academic_term):
+	"""Every student's marks for one course in a term, grouped by student.
+
+	The by-course counterpart of get_assessment_results, and it resolves the same
+	way: an approved Course Mark Sheet is the record for the course it covers, and
+	Assessment Result answers for everything else.
+	"""
+	results = frappe.get_all(
+		"Assessment Result",
+		fields=[
+			"student",
+			"assessment_group",
+			"custom_sitting as sitting",
+			"total_score",
+			"maximum_score",
+		],
+		filters={"course": course, "academic_term": academic_term, "docstatus": 1},
+		limit_page_length=0,
+	)
+
+	by_student = {}
+	for result in results:
+		row = dict(result)
+		row["course"] = course
+		by_student.setdefault(result.student, []).append(row)
+
+	sheet_rows = frappe.db.sql(
+		"""
+		select entry.student, entry.assessment_group, entry.raw_score, entry.moderated_score,
+		       entry.maximum_score, sheet.moderation_method, sheet.sitting
+		from `tabCourse Mark Sheet Entry` entry
+		join `tabCourse Mark Sheet` sheet on sheet.name = entry.parent
+		where sheet.docstatus = 1
+		  and sheet.course = %(course)s
+		  and sheet.academic_term = %(academic_term)s
+		  and entry.status = 'Marked'
+		""",
+		{"course": course, "academic_term": academic_term},
+		as_dict=True,
+	)
+
+	# Wholesale per student, for the same reason the by-student version does it:
+	# half a course's marks from each source would be nobody's answer.
+	from_sheet = {}
+	for row in sheet_rows:
+		moderated = row.moderation_method in ("Linear Scale", "Flat Adjustment")
+		from_sheet.setdefault(row.student, []).append(
+			{
+				"course": course,
+				"assessment_group": row.assessment_group,
+				"sitting": row.sitting,
+				"total_score": row.moderated_score if moderated else row.raw_score,
+				"maximum_score": row.maximum_score or 100,
+			}
+		)
+	by_student.update(from_sheet)
+	return by_student
+
+
+def course_marks(course, academic_year, academic_term):
+	"""One row per student for a whole course, as a QA reviewer needs to read it.
+
+	Returns the scheme's assessments in the order the scheme lists them, so the
+	columns follow the course rather than a fixed set, and a row per student
+	carrying each score, the semester mark, the final mark, the supplementary
+	mark and the stored comments.
+	"""
+	from education_extension.education_extension.doctype.course_mark_scheme.course_mark_scheme import (
+		get_scheme,
+	)
+	from education_extension.education_extension.doctype.marking_settings.marking_settings import (
+		order_students,
+	)
+
+	scheme = get_scheme(course, academic_year)
+	criteria = list(scheme.criteria) if scheme else []
+	by_student = get_course_results(course, academic_term)
+
+	comments = _course_remarks(course, academic_term, "Academic Remark", "remark")
+	supp_comments = _course_remarks(
+		course, academic_term, "Supplementary Academic Remark", "supp_remark"
+	)
+	names = _student_names(by_student)
+
+	rows = []
+	for student in order_students(list(by_student)):
+		results = by_student[student]
+		resolved = resolve_results(results)
+		by_name = {group.casefold(): group for group in resolved}
+
+		scores = {}
+		for row in criteria:
+			group = row.assessment_group
+			matched = by_name.get(group.casefold())
+			ratio = score_ratio(resolved[matched]) if matched else None
+			scores[group] = round_half_up(ratio * 100) if ratio is not None else "-"
+
+		computed = (
+			calculate_course_mark(criteria, results)
+			if criteria
+			else calculate_final_results_detailed(results).get(course)
+		)
+		complete = computed and computed["dp_complete"] and computed["exams_complete"]
+		supplementary = _supplementary_for(results)
+
+		rows.append(
+			{
+				"student": student,
+				"student_name": names.get(student, student),
+				"scores": scores,
+				"dp": round_half_up(computed["dp"]) if computed and computed["dp_complete"] else "-",
+				"final_mark": round_half_up(computed["final_mark"]) if complete else "-",
+				"supplementary": supplementary,
+				"remark": comments.get(student, ""),
+				"supp_remark": supp_comments.get(student, ""),
+				"missing": computed["missing"] if computed else [],
+				"failed_subminima": (computed or {}).get("failed_subminima") or [],
+			}
+		)
+
+	return {"criteria": criteria, "rows": rows, "scheme": scheme.name if scheme else None}
+
+
+def _supplementary_for(results):
+	"""The supplementary mark among a student's results, as a percentage."""
+	for result in results:
+		_group, sitting = sitting_of(result)
+		if sitting != SUPPLEMENTARY:
+			continue
+		ratio = score_ratio(result)
+		if ratio is not None:
+			return round_half_up(ratio * 100)
+	return "-"
+
+
+def _course_remarks(course, academic_term, doctype, fieldname):
+	rows = frappe.get_all(
+		doctype,
+		fields=["student", fieldname],
+		filters={"course": course, "academic_term": academic_term, "docstatus": 1},
+		limit_page_length=0,
+	)
+	return {row.student: row.get(fieldname) for row in rows if row.get(fieldname)}
+
+
+def _student_names(by_student):
+	"""Surname first, the way a mark sheet is read. Built from the name fields
+	rather than by splitting the full name, which guesses wrong on a double
+	surname."""
+	names = {}
+	for row in frappe.get_all(
+		"Student",
+		fields=["name", "student_name", "first_name", "last_name"],
+		filters={"name": ["in", list(by_student)]},
+		limit_page_length=0,
+	):
+		if row.last_name and row.first_name:
+			names[row.name] = f"{row.last_name}, {row.first_name}"
+		else:
+			names[row.name] = row.student_name or row.name
+	return names
+
+
 def final_marks(student, academic_year, academic_term):
 	"""Final mark per course in the form the printed report shows it: a whole
 	percentage, or a dash while the marks are incomplete."""

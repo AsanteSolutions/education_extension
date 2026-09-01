@@ -12,6 +12,7 @@ from education_extension.education_extension.doctype.student_progress_report.stu
 	calculate_final_results,
 )
 from education_extension.education_extension.marking import (
+	REMARK_CODES,
 	calculate_course_mark,
 	format_mark,
 	resolve_results,
@@ -250,3 +251,23 @@ class TestMarking(FrappeTestCase):
 			]
 		)
 		self.assertEqual(resolved["Theory Exam"]["total_score"], 70)
+
+	def test_every_code_in_the_printed_legend_can_be_chosen(self):
+		"""The legend explains what a code means to a student; if QA cannot pick
+		one, the report explains something nobody can award."""
+		import os
+		import re
+
+		template = os.path.join(
+			os.path.dirname(__file__),
+			"doctype",
+			"student_progress_report",
+			"student_progress_report_template.html",
+		)
+		with open(template) as handle:
+			legend = set(
+				re.findall(r'<td class="code">(?:<sup>\d</sup>\s*)?([A-Z]+)</td>', handle.read())
+			)
+
+		self.assertTrue(legend, "no codes found in the legend — has the template changed?")
+		self.assertEqual(legend - set(REMARK_CODES), set())

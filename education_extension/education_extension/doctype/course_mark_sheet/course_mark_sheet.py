@@ -99,6 +99,7 @@ class CourseMarkSheet(Document):
 		these marks — the calculation reads it in preference to any Assessment
 		Result for the same course."""
 		self.validate_every_mark_accounted_for()
+		self.validate_every_student_has_a_comment()
 		self.approved_by = frappe.session.user
 
 	def validate_scheme(self):
@@ -205,6 +206,40 @@ class CourseMarkSheet(Document):
 			frappe.throw(
 				_("{0} mark(s) are neither entered nor marked absent, starting with {1}.").format(
 					len(outstanding), frappe.bold(outstanding[0])
+				)
+			)
+
+	def validate_every_student_has_a_comment(self):
+		"""Approval is the Head signing off a result, and a result is a mark and
+		what QA made of it. A sheet reaching approval with comments missing means
+		nobody said what those marks amount to, which is the checking step half
+		done rather than finished."""
+		doctype, fieldname = (
+			("Supplementary Academic Remark", "supp_remark")
+			if self.sitting == SUPPLEMENTARY
+			else ("Academic Remark", "remark")
+		)
+
+		commented = {
+			row.student
+			for row in frappe.get_all(
+				doctype,
+				fields=["student", fieldname],
+				filters={
+					"course": self.course,
+					"academic_term": self.academic_term,
+					"docstatus": 1,
+				},
+				limit_page_length=0,
+			)
+			if row.get(fieldname)
+		}
+
+		missing = sorted({entry.student for entry in self.entries} - commented)
+		if missing:
+			frappe.throw(
+				_("{0} student(s) have no comment yet, starting with {1}. Add them from the QA review.").format(
+					len(missing), frappe.bold(missing[0])
 				)
 			)
 

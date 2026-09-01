@@ -177,3 +177,23 @@ class TestCourseMarkSheet(FrappeTestCase):
 		"""A student can miss a paper without producing the documentation that
 		entitles them to sit it again."""
 		self.assertEqual(AEGROTAT_COMMENT, "AEGRO")
+
+	def test_approval_needs_a_comment_for_every_student(self):
+		"""A result is a mark and what QA made of it. Approving with comments
+		missing signs off half of one."""
+		doc = sheet_with([("S1", "Test 1", MARKED, 60, 0), ("S2", "Test 1", MARKED, 55, 0)])
+		doc.course, doc.academic_term = "no-such-course", "no-such-term"
+
+		# No comments exist for that course, so every student is outstanding.
+		with self.assertRaises(frappe.ValidationError):
+			doc.validate_every_student_has_a_comment()
+
+	def test_the_supplementary_gate_looks_at_supplementary_comments(self):
+		"""A student can carry SUPP on the main sheet and still have nothing said
+		about how the supplementary itself went."""
+		doc = sheet_with([("S1", "Supplementary Exam", MARKED, 52, 0)])
+		doc.sitting = "Supplementary"
+		doc.course, doc.academic_term = "no-such-course", "no-such-term"
+
+		with self.assertRaises(frappe.ValidationError):
+			doc.validate_every_student_has_a_comment()

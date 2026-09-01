@@ -385,8 +385,11 @@ function render_qa_review(frm) {
 
 function draw_qa_table(frm, $wrapper, data) {
 	const escape = frappe.utils.escape_html
-	const coursework = data.criteria.filter((c) => c.component === 'Coursework')
-	const examination = data.criteria.filter((c) => c.component !== 'Coursework')
+	// A re-sitting has no semester or final mark, so those columns are left out
+	// rather than shown empty.
+	const full = data.mode !== 'marks'
+	const coursework = full ? data.criteria.filter((c) => c.component === 'Coursework') : data.criteria
+	const examination = full ? data.criteria.filter((c) => c.component !== 'Coursework') : []
 	const editable = frm.doc.docstatus === 0
 
 	const head = []
@@ -394,11 +397,15 @@ function draw_qa_table(frm, $wrapper, data) {
 			['<th style="min-width:96px">' + __('Student') + '</th>'],
 			['<th style="min-width:200px">' + __('Name') + '</th>'],
 			coursework.map((c) => '<th class="text-center">' + escape(c.assessment_group) + '</th>'),
-			['<th class="text-center">' + __('Semester Mark') + '</th>'],
+			full ? ['<th class="text-center">' + __('Semester Mark') + '</th>'] : [],
 			examination.map((c) => '<th class="text-center">' + escape(c.assessment_group) + '</th>'),
+			full
+				? [
+						'<th class="text-center">' + __('Final Mark') + '</th>',
+						'<th class="text-center">' + __('Supp Mark') + '</th>',
+					]
+				: [],
 			[
-				'<th class="text-center">' + __('Final Mark') + '</th>',
-				'<th class="text-center">' + __('Supp Mark') + '</th>',
 				'<th class="text-center">' + __('Remark') + '</th>',
 				'<th class="text-center">' + __('Supp Remark') + '</th>',
 			],
@@ -431,10 +438,9 @@ function draw_qa_table(frm, $wrapper, data) {
 					: '') +
 				'</td>' +
 				coursework.map((c) => cell(row.scores[c.assessment_group])).join('') +
-				cell(row.dp) +
+				(full ? cell(row.dp) : '') +
 				examination.map((c) => cell(row.scores[c.assessment_group])).join('') +
-				cell(row.final_mark) +
-				cell(row.supplementary) +
+				(full ? cell(row.final_mark) + cell(row.supplementary) : '') +
 				comment_cell(row.student, row.remark, false) +
 				comment_cell(row.student, row.supp_remark, true) +
 				'</tr>'
@@ -444,12 +450,13 @@ function draw_qa_table(frm, $wrapper, data) {
 
 	const commented = data.rows.filter((r) => r.remark).length
 	const incomplete = data.rows.filter((r) => r.missing && r.missing.length).length
+	const what = full ? __('students') : __('sitting this')
 
 	$wrapper.html(
 		'<div class="qa-review">' +
 			'<div class="text-muted small" style="margin-bottom:8px">' +
-				__('{0} students &middot; {1} commented &middot; {2} incomplete', [
-					data.rows.length, commented, incomplete,
+				__('{0} {1} &middot; {2} commented &middot; {3} outstanding', [
+					data.rows.length, what, commented, incomplete,
 				]) +
 				(data.moderated ? ' &middot; <b>' + __('showing moderated marks') + '</b>' : '') +
 			'</div>' +

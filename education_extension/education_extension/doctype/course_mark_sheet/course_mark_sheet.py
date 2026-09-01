@@ -6,6 +6,10 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import now_datetime
 
+from education_extension.education_extension.doctype.student_progress_report.student_progress_report import (
+	round_half_up,
+)
+
 from education_extension.education_extension.doctype.course_mark_scheme.course_mark_scheme import (
 	get_scheme,
 )
@@ -38,6 +42,21 @@ MODERATION_FLAT = "Flat Adjustment"
 NOT_MARKED = "Not Marked"
 MARKED = "Marked"
 ABSENT = "Absent"
+
+# The sittings a sheet can cover. Main is the course as everyone sits it; the
+# other two are re-sittings, and each is opened for a different reason and so
+# for a different set of students.
+MAIN = "Main"
+SUPPLEMENTARY = "Supplementary"
+AEGROTAT = "Aegrotat"
+SPECIAL = "Special"
+
+# A supplementary is one paper covering the course, not a re-sit of each
+# assessment, which is why it is reported in a column of its own.
+SUPPLEMENTARY_GROUP = "Supplementary Exam"
+
+# Who is entitled to a supplementary: QA says so with this comment.
+SUPPLEMENTARY_COMMENT = "SUPP"
 
 
 def entry_key(student, assessment_group):
@@ -259,22 +278,89 @@ class CourseMarkSheet(Document):
 		"""
 		from education_extension.education_extension.marking import review_rows
 
-		scheme = frappe.get_doc("Course Mark Scheme", self.mark_scheme)
-
 		by_student = {}
 		for entry in self.entries:
 			by_student.setdefault(entry.student, [])
 		for row in self.marks():
 			by_student[row["student"]].append(row)
 
+		moderated = self.moderation_method in (MODERATION_LINEAR, MODERATION_FLAT)
+
+		if self.sitting != MAIN:
+			# A re-sitting has no semester mark and no final mark: it is one or two
+			# papers, not the course. Showing the columns anyway would fill them
+			# with dashes and invite someone to read a missing mark as a failed one.
+			return {
+				"mode": "marks",
+				"criteria": self.sheet_assessments(),
+				"rows": self.resit_rows(),
+				"moderated": moderated,
+			}
+
+		scheme = frappe.get_doc("Course Mark Scheme", self.mark_scheme)
 		return {
+			"mode": "full",
 			"criteria": [
 				{"assessment_group": row.assessment_group, "component": row.component}
 				for row in scheme.criteria
 			],
 			"rows": review_rows(self.course, self.academic_term, scheme.criteria, by_student),
-			"moderated": self.moderation_method in (MODERATION_LINEAR, MODERATION_FLAT),
+			"moderated": moderated,
 		}
+
+	def sheet_assessments(self):
+		"""The assessments this sheet actually covers, in the order they appear."""
+		seen, groups = set(), []
+		for entry in self.entries:
+			if entry.assessment_group not in seen:
+				seen.add(entry.assessment_group)
+				groups.append({"assessment_group": entry.assessment_group, "component": "Examination"})
+		return groups
+
+	def resit_rows(self):
+		"""A row per student on a re-sit sheet: what they sat and what they got.
+
+		Deliberately not run through the mark calculation — the marks on this sheet
+		belong to the course's result, which the main sheet and the reports work
+		out together, not to this sheet on its own.
+		"""
+		from education_extension.education_extension.doctype.marking_settings.marking_settings import (
+			order_students,
+		)
+		from education_extension.education_extension.marking import _course_remarks, _student_names
+
+		by_student = {}
+		for entry in self.entries:
+			score = self.effective_score(entry)
+			by_student.setdefault(entry.student, {})[entry.assessment_group] = (
+				round_half_up(score / (entry.maximum_score or 100) * 100)
+				if score is not None
+				else ("Absent" if entry.status == ABSENT else "-")
+			)
+
+		comments = _course_remarks(self.course, self.academic_term, "Academic Remark", "remark")
+		supp_comments = _course_remarks(
+			self.course, self.academic_term, "Supplementary Academic Remark", "supp_remark"
+		)
+		names = _student_names(by_student)
+
+		return [
+			{
+				"student": student,
+				"student_name": names.get(student, student),
+				"scores": by_student[student],
+				"dp": "",
+				"final_mark": "",
+				"supplementary": "",
+				"remark": comments.get(student, ""),
+				"supp_remark": supp_comments.get(student, ""),
+				"missing": [
+					group for group, value in by_student[student].items() if value == "-"
+				],
+				"failed_subminima": [],
+			}
+			for student in order_students(list(by_student))
+		]
 
 	@frappe.whitelist()
 	def generate_entries(self):
@@ -287,19 +373,11 @@ class CourseMarkSheet(Document):
 		if self.workflow_state not in ENTRY_STATES:
 			frappe.throw(_("Entries can only be generated while the sheet is awaiting or in entry."))
 
-		scheme = frappe.get_doc("Course Mark Scheme", self.mark_scheme)
-		students = self.get_students()
-		if not students:
-			frappe.throw(
-				_("No students are enrolled for {0} in {1}.").format(
-					frappe.bold(self.course), frappe.bold(self.academic_term)
-				)
-			)
+		wanted = self.wanted_entries()
+		if not wanted:
+			frappe.throw(self.nothing_to_generate_message())
 
 		existing = {(entry.student, entry.assessment_group): entry for entry in self.entries}
-		wanted = [
-			(student, row.assessment_group) for student in students for row in scheme.criteria
-		]
 
 		self.entries = []
 		for student, assessment_group in wanted:
@@ -317,7 +395,124 @@ class CourseMarkSheet(Document):
 			)
 
 		self.save()
-		return {"students": len(students), "entries": len(self.entries)}
+		return {
+			"students": len({student for student, _group in wanted}),
+			"entries": len(self.entries),
+		}
+
+	def wanted_entries(self):
+		"""Which (student, assessment) pairs belong on this sheet.
+
+		Main covers everyone enrolled across every assessment the scheme weights.
+		A re-sitting covers neither: only the students entitled to it, and only the
+		assessments they are actually sitting again. Generating a re-sit sheet the
+		way a main one is generated would put the whole cohort on it and then
+		refuse to approve until every irrelevant cell was marked absent.
+		"""
+		if self.sitting == MAIN:
+			scheme = frappe.get_doc("Course Mark Scheme", self.mark_scheme)
+			return [
+				(student, row.assessment_group)
+				for student in self.get_students()
+				for row in scheme.criteria
+			]
+
+		if self.sitting == SUPPLEMENTARY:
+			return [(student, SUPPLEMENTARY_GROUP) for student in self.supplementary_students()]
+
+		if self.sitting == AEGROTAT:
+			return self.aegrotat_entries()
+
+		frappe.throw(
+			_(
+				"A {0} sitting is either a supplementary or an aegrotat one. Open the sheet as "
+				"whichever it is, so it knows who is sitting it and what they are sitting."
+			).format(frappe.bold(SPECIAL))
+		)
+
+	def supplementary_students(self):
+		"""Everyone QA has given the SUPP comment for this course and term.
+
+		Entitlement is a QA judgement rather than a mark threshold — the legend
+		distinguishes a supplementary from a subminimum failure that does not
+		qualify for one — so the comment is what decides it."""
+		from education_extension.education_extension.doctype.marking_settings.marking_settings import (
+			order_students,
+		)
+
+		return order_students(
+			frappe.get_all(
+				"Academic Remark",
+				filters={
+					"course": self.course,
+					"academic_term": self.academic_term,
+					"remark": SUPPLEMENTARY_COMMENT,
+					"docstatus": 1,
+				},
+				pluck="student",
+				limit_page_length=0,
+			)
+		)
+
+	def aegrotat_entries(self):
+		"""Whoever missed a sitting, and only what they missed.
+
+		Read off the main sheet, which is the only place an absence is recorded —
+		an Assessment Result cannot say a student was absent, only that there is no
+		mark, which is not the same thing.
+		"""
+		from education_extension.education_extension.doctype.marking_settings.marking_settings import (
+			order_students,
+		)
+
+		main = frappe.get_all(
+			"Course Mark Sheet",
+			filters={
+				"course": self.course,
+				"academic_term": self.academic_term,
+				"sitting": MAIN,
+				"docstatus": ["<", 2],
+			},
+			pluck="name",
+			limit=1,
+		)
+		if not main:
+			frappe.throw(
+				_(
+					"{0} has no main sheet for {1}, and an absence is only recorded on one. "
+					"Open the main sheet first."
+				).format(frappe.bold(self.course), frappe.bold(self.academic_term))
+			)
+
+		absences = frappe.get_all(
+			"Course Mark Sheet Entry",
+			fields=["student", "assessment_group"],
+			filters={"parent": main[0], "parenttype": "Course Mark Sheet", "status": ABSENT},
+			limit_page_length=0,
+		)
+
+		by_student = {}
+		for row in absences:
+			by_student.setdefault(row.student, []).append(row.assessment_group)
+
+		return [
+			(student, group)
+			for student in order_students(list(by_student))
+			for group in sorted(by_student[student])
+		]
+
+	def nothing_to_generate_message(self):
+		if self.sitting == SUPPLEMENTARY:
+			return _("Nobody is marked {0} for {1} in {2}, so there is no supplementary to sit.").format(
+				frappe.bold(SUPPLEMENTARY_COMMENT), frappe.bold(self.course), frappe.bold(self.academic_term)
+			)
+		if self.sitting == AEGROTAT:
+			return _("Nobody was marked absent on the main sheet for {0} in {1}.").format(
+				frappe.bold(self.course), frappe.bold(self.academic_term)
+			)
+		return _("No students are enrolled for {0} in {1}.").format(
+			frappe.bold(self.course), frappe.bold(self.academic_term)
+		)
 
 	def get_students(self):
 		"""Whose marks belong on this sheet, in the order Marking Settings lists a

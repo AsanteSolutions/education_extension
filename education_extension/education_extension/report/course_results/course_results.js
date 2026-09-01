@@ -25,7 +25,7 @@ function edit_remark(student, doctype, fieldname, title) {
 		academic_term: report.get_filter_value('academic_term'),
 	}
 
-	Promise.all([get_remark_codes(), frappe.db.get_value(doctype, keys, ['name', fieldname])]).then(
+	Promise.all([get_remark_codes(), frappe.db.get_value(doctype, keys, [fieldname])]).then(
 		([codes, res]) => {
 			const existing = (res && res.message) || {}
 
@@ -46,19 +46,20 @@ function edit_remark(student, doctype, fieldname, title) {
 						report.refresh()
 					}
 
-					if (existing.name) {
-						frappe.db.set_value(doctype, existing.name, fieldname, comment).then(done)
-					} else {
-						frappe.call({
-							method: 'frappe.client.insert',
-							args: {
-								doc: Object.assign({ doctype: doctype, [fieldname]: comment }, keys),
-							},
-							callback: (r) => {
-								if (!r.exc) done()
-							},
-						})
-					}
+					frappe.call({
+						method: 'education_extension.education_extension.marking.set_course_remark',
+						args: {
+							student: student,
+							course: keys.course,
+							academic_year: keys.academic_year,
+							academic_term: keys.academic_term,
+							comment: comment,
+							supplementary: doctype === 'Supplementary Academic Remark' ? 1 : 0,
+						},
+						callback: (r) => {
+							if (!r.exc) done()
+						},
+					})
 				},
 				__('{0} for {1}', [title, student]),
 				__('Save'),

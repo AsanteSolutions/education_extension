@@ -29,6 +29,7 @@ frappe.ui.form.on('Course Mark Sheet', {
 
 		show_progress(frm)
 		render_mark_entry(frm)
+		render_qa_review(frm)
 	},
 })
 
@@ -339,4 +340,185 @@ function parse_mark(value, maximum) {
 	const score = Number(text)
 	if (Number.isNaN(score) || score < 0 || score > maximum) return null
 	return { status: 'Marked', raw_score: score }
+}
+
+// ---------------------------------------------------------------------------
+// QA review: the sheet in the shape the Course Results report shows it
+//
+// Once the marks are in, the sheet stops being a grid to fill and becomes a set
+// of results to read: every score, the semester mark, the final mark and the
+// comment, a row per student. The marks are not editable here — they are what
+// is under review — but the comments are, because deciding a mark is sound and
+// deciding what to call it is one job.
+// ---------------------------------------------------------------------------
+
+const REVIEW_STATES = ['Submitted for Checking', 'Checked', 'Moderated', 'Approved', 'Released']
+
+let remark_codes = null
+
+function get_remark_codes() {
+	if (remark_codes) return Promise.resolve(remark_codes)
+	return frappe
+		.call('education_extension.education_extension.marking.get_remark_codes')
+		.then((r) => (remark_codes = r.message || []))
+}
+
+function render_qa_review(frm) {
+	const field = frm.get_field('qa_review')
+	if (!field) return
+
+	const $wrapper = $(field.wrapper).empty()
+	if (!REVIEW_STATES.includes(frm.doc.workflow_state)) {
+		$wrapper.html(
+			'<div class="text-muted" style="padding:12px 0">' +
+				__('Available once the sheet has been submitted for checking.') +
+				'</div>',
+		)
+		return
+	}
+
+	frm.call('qa_review').then((r) => {
+		if (!r.message) return
+		draw_qa_table(frm, $wrapper, r.message)
+	})
+}
+
+function draw_qa_table(frm, $wrapper, data) {
+	const escape = frappe.utils.escape_html
+	const coursework = data.criteria.filter((c) => c.component === 'Coursework')
+	const examination = data.criteria.filter((c) => c.component !== 'Coursework')
+	const editable = frm.doc.docstatus === 0
+
+	const head = []
+		.concat(
+			['<th style="min-width:96px">' + __('Student') + '</th>'],
+			['<th style="min-width:200px">' + __('Name') + '</th>'],
+			coursework.map((c) => '<th class="text-center">' + escape(c.assessment_group) + '</th>'),
+			['<th class="text-center">' + __('Semester Mark') + '</th>'],
+			examination.map((c) => '<th class="text-center">' + escape(c.assessment_group) + '</th>'),
+			[
+				'<th class="text-center">' + __('Final Mark') + '</th>',
+				'<th class="text-center">' + __('Supp Mark') + '</th>',
+				'<th class="text-center">' + __('Remark') + '</th>',
+				'<th class="text-center">' + __('Supp Remark') + '</th>',
+			],
+		)
+		.join('')
+
+	const cell = (value) =>
+		value === '-'
+			? '<td class="text-center text-muted">-</td>'
+			: '<td class="text-center">' + escape(String(value)) + '</td>'
+
+	const comment_cell = (student, value, supplementary) =>
+		'<td class="text-center">' +
+		'<a class="qa-comment" data-student="' + escape(student) + '"' +
+		' data-supplementary="' + (supplementary ? 1 : 0) + '">' +
+		(value ? '<b>' + escape(value) + '</b>' : (editable ? __('add') : '—')) +
+		'</a></td>'
+
+	const body = data.rows
+		.map((row) => {
+			// A student still missing a mark is the thing a checker is looking for,
+			// so the row says so rather than leaving them to spot a dash.
+			const outstanding = row.missing && row.missing.length
+			return (
+				'<tr' + (outstanding ? ' class="text-danger"' : '') + '>' +
+				'<td class="text-muted small" style="white-space:nowrap">' + escape(row.student) + '</td>' +
+				'<td style="white-space:nowrap">' + escape(row.student_name) +
+				(outstanding
+					? ' <span class="text-danger small">(' + __('missing {0}', [escape(row.missing.join(', '))]) + ')</span>'
+					: '') +
+				'</td>' +
+				coursework.map((c) => cell(row.scores[c.assessment_group])).join('') +
+				cell(row.dp) +
+				examination.map((c) => cell(row.scores[c.assessment_group])).join('') +
+				cell(row.final_mark) +
+				cell(row.supplementary) +
+				comment_cell(row.student, row.remark, false) +
+				comment_cell(row.student, row.supp_remark, true) +
+				'</tr>'
+			)
+		})
+		.join('')
+
+	const commented = data.rows.filter((r) => r.remark).length
+	const incomplete = data.rows.filter((r) => r.missing && r.missing.length).length
+
+	$wrapper.html(
+		'<div class="qa-review">' +
+			'<div class="text-muted small" style="margin-bottom:8px">' +
+				__('{0} students &middot; {1} commented &middot; {2} incomplete', [
+					data.rows.length, commented, incomplete,
+				]) +
+				(data.moderated ? ' &middot; <b>' + __('showing moderated marks') + '</b>' : '') +
+			'</div>' +
+			'<div style="overflow:auto;max-height:60vh;border:1px solid var(--border-color)">' +
+				'<table class="table table-bordered table-condensed" style="margin:0">' +
+					'<thead style="position:sticky;top:0;background:var(--fg-color);z-index:1"><tr>' +
+						head +
+					'</tr></thead><tbody>' + body + '</tbody>' +
+				'</table>' +
+			'</div>' +
+		'</div>',
+	)
+
+	$wrapper.on('click', '.qa-comment', function () {
+		if (!editable) return
+		edit_comment(frm, $(this).attr('data-student'), $(this).attr('data-supplementary') === '1')
+	})
+}
+
+// Comments are stored as Academic Remarks against the course and term, the same
+// records the printed report reads, so nothing has to be copied across on
+// approval.
+function edit_comment(frm, student, supplementary) {
+	const doctype = supplementary ? 'Supplementary Academic Remark' : 'Academic Remark'
+	const fieldname = supplementary ? 'supp_remark' : 'remark'
+	const keys = {
+		student: student,
+		course: frm.doc.course,
+		academic_year: frm.doc.academic_year,
+		academic_term: frm.doc.academic_term,
+	}
+
+	Promise.all([get_remark_codes(), frappe.db.get_value(doctype, keys, [fieldname])]).then(
+		([codes, res]) => {
+			const existing = (res && res.message) || {}
+			frappe.prompt(
+				[
+					{
+						fieldname: fieldname,
+						fieldtype: 'Select',
+						label: __('Comment'),
+						options: [''].concat(codes).join('\n'),
+						default: existing[fieldname] || '',
+					},
+				],
+				(values) => {
+					const comment = values[fieldname] || ''
+					const done = () => {
+						frappe.show_alert({ message: __('Comment saved'), indicator: 'green' })
+						render_qa_review(frm)
+					}
+					frappe.call({
+						method: 'education_extension.education_extension.marking.set_course_remark',
+						args: {
+							student: student,
+							course: frm.doc.course,
+							academic_year: frm.doc.academic_year,
+							academic_term: frm.doc.academic_term,
+							comment: comment,
+							supplementary: supplementary ? 1 : 0,
+						},
+						callback: (r) => {
+							if (!r.exc) done()
+						},
+					})
+				},
+				__('Comment for {0}', [student]),
+				__('Save'),
+			)
+		},
+	)
 }

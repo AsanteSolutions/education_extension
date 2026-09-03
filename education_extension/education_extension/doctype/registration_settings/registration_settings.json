@@ -1,0 +1,69 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-09-03 09:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "fees_section",
+  "block_on_outstanding_fees",
+  "outstanding_fee_tolerance"
+ ],
+ "fields": [
+  {
+   "fieldname": "fees_section",
+   "fieldtype": "Section Break",
+   "label": "Fees"
+  },
+  {
+   "default": "0",
+   "description": "Refuse registration to a student who owes money. The balance is the outstanding total on their submitted Sales Invoices; with no invoices raised the balance is zero and nobody is blocked.",
+   "fieldname": "block_on_outstanding_fees",
+   "fieldtype": "Check",
+   "label": "Outstanding Fees Block Registration"
+  },
+  {
+   "default": "0",
+   "depends_on": "block_on_outstanding_fees",
+   "description": "Balances at or below this are ignored, so a student owing a few rand is not turned away.",
+   "fieldname": "outstanding_fee_tolerance",
+   "fieldtype": "Currency",
+   "label": "Tolerance"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-09-03 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Education Extension",
+ "name": "Registration Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Education Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -1,0 +1,131 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "format:{academic_term}",
+ "creation": "2026-09-03 09:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "academic_term",
+  "academic_year",
+  "column_break_dates",
+  "opens_on",
+  "last_date_to_register",
+  "is_open",
+  "scope_section",
+  "programs"
+ ],
+ "fields": [
+  {
+   "fieldname": "academic_term",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Academic Term",
+   "options": "Academic Term",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fetch_from": "academic_term.academic_year",
+   "fieldname": "academic_year",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Academic Year",
+   "options": "Academic Year",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_dates",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "opens_on",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Opens On",
+   "reqd": 1
+  },
+  {
+   "description": "The last day a student may register. Nothing about the registration can change after it, so an outstanding supplementary result that lands later no longer removes a provisional module -- it is reported for staff instead.",
+   "fieldname": "last_date_to_register",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Last Date to Register",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "description": "Clear this to shut registration before the last date, without editing the dates.",
+   "fieldname": "is_open",
+   "fieldtype": "Check",
+   "label": "Open"
+  },
+  {
+   "fieldname": "scope_section",
+   "fieldtype": "Section Break",
+   "label": "Scope"
+  },
+  {
+   "description": "Leave empty to cover every programme.",
+   "fieldname": "programs",
+   "fieldtype": "Table MultiSelect",
+   "label": "Programmes",
+   "options": "Registration Period Program"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-03 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Education Extension",
+ "name": "Registration Period",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Education Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Academics User",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Student"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "opens_on",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -6,11 +6,27 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
+  "eligibility_section",
+  "missing_result_policy",
   "fees_section",
   "block_on_outstanding_fees",
   "outstanding_fee_tolerance"
  ],
  "fields": [
+  {
+   "fieldname": "eligibility_section",
+   "fieldtype": "Section Break",
+   "label": "Eligibility"
+  },
+  {
+   "default": "Do not block",
+   "description": "Do not block: only a recorded failure stops a student registering, and a prerequisite with no result is reported on the row instead. Choose this while results predate the system, or every student is blocked from everything. Treat as not passed: a prerequisite with no result blocks, which is only correct once every result a student needs is recorded here.",
+   "fieldname": "missing_result_policy",
+   "fieldtype": "Select",
+   "label": "When a prerequisite has no result on record",
+   "options": "Do not block\nTreat as not passed",
+   "reqd": 1
+  },
   {
    "fieldname": "fees_section",
    "fieldtype": "Section Break",

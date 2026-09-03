@@ -5,3 +5,4 @@ education_extension.patches.convert_remark_codes
 
 [post_model_sync]
 # Patches added in this section will be executed after doctypes are migrated
+education_extension.patches.seed_course_prerequisites

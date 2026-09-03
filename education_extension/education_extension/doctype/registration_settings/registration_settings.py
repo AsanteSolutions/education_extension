@@ -3,18 +3,37 @@
 
 """Institute-wide registration policy.
 
-Only the fee rule lives here so far, and it is off by default. Policy that holds
-across terms belongs here rather than being restated on every Registration
-Period, where it would drift.
+Policy that holds across terms belongs here rather than being restated on every
+Registration Period, where it would drift.
 """
 
 import frappe
 from frappe.model.document import Document
 from frappe.query_builder.functions import Sum
 
+# What an institution means by a prerequisite with no result on record.
+MISSING_IGNORED = "Do not block"
+MISSING_BLOCKS = "Treat as not passed"
+
 
 class RegistrationSettings(Document):
 	pass
+
+
+def missing_result_blocks():
+	"""Whether a prerequisite with no result stops a student registering.
+
+	The honest answer depends on whether the institution's results are all in the
+	system. Where they are, silence means the module was never passed and should
+	block. Where the system was adopted mid-programme -- as here, with one term on
+	record and most students enrolled straight into their second or third year --
+	silence means only that the result predates the system, and blocking on it
+	stops every student from everything.
+
+	Defaults to not blocking, because that failure is recoverable by a registrar
+	and the other is not: a cohort that cannot register at all has no way through.
+	"""
+	return frappe.db.get_single_value("Registration Settings", "missing_result_policy") == MISSING_BLOCKS
 
 
 def outstanding_balance(student):

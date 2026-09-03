@@ -23,6 +23,7 @@ from education_extension.education_extension.doctype.registration_period.registr
 )
 from education_extension.education_extension.doctype.registration_settings.registration_settings import (
 	fee_block,
+	missing_result_blocks,
 )
 from education_extension.education_extension.doctype.student_progress_report.student_progress_report import (
 	_program_semester,
@@ -210,19 +211,17 @@ def next_block(student, academic_term):
 	return {"block": candidate, "reason": None}
 
 
-def unmet_prerequisites(course, history, alongside, rules):
+def unmet_prerequisites(course, history, alongside, rules, strict=False):
 	"""(blocking, outstanding, unverified) for one module.
 
-	Only a *recorded failure* blocks. A prerequisite with no result on record at
-	all does not, because absence of a result is not a failure: this system holds
-	one term of history, and most students were enrolled into the middle of the
-	programme, so the years they actually passed leave no trace here. Treating
-	that silence as failure would block every student from everything.
+	A recorded failure always blocks. What a prerequisite with *no result at all*
+	means is the institution's call, carried by `strict` — see
+	`registration_settings.missing_result_blocks`. Under `strict` it blocks like a
+	failure; otherwise it lands in `unverified`, which reports the gap without
+	stopping the student.
 
-	The cost is that a student who genuinely never took a prerequisite is not
-	stopped either. That is the safer direction to be wrong in while the history
-	is this thin, and the unverified list keeps it visible rather than silent.
-	Once results accumulate over a few terms this can be tightened.
+	`strict` is a parameter rather than a settings lookup so the rule can be
+	tested both ways without touching the database.
 
 	Outstanding prerequisites are waiting on a supplementary or aegrotat result —
 	enough to register on, but only provisionally. A co-requisite is satisfied by
@@ -233,17 +232,18 @@ def unmet_prerequisites(course, history, alongside, rules):
 	outstanding = []
 	unverified = []
 
+	def unmet(other):
+		(blocking if strict else unverified).append(other)
+
 	for other, kind in rules.get(course, ()):
 		outcome = history.get(other, NEVER)
 
 		if kind == COREQUISITE:
-			# Being taken alongside satisfies it; so does having passed it. No
-			# record means it is not being taken and was never passed here, which
-			# for a co-requisite is the same unverified silence as above.
+			# Being taken alongside satisfies it; so does having passed it.
 			if outcome == PASSED or other in alongside:
 				continue
 			if outcome == NEVER:
-				unverified.append(other)
+				unmet(other)
 			else:
 				blocking.append(other)
 			continue
@@ -253,7 +253,7 @@ def unmet_prerequisites(course, history, alongside, rules):
 		if outcome == PENDING:
 			outstanding.append(other)
 		elif outcome == NEVER:
-			unverified.append(other)
+			unmet(other)
 		else:
 			blocking.append(other)
 
@@ -321,13 +321,17 @@ def options_for(student, on=None):
 	curriculum = courses_by_block()
 	already = registered_courses(student, period.academic_year, period.academic_term)
 
-	# This block, plus anything behind it with a result on record that is not a
-	# pass. A module with no record at all is left out entirely: for most students
-	# here that is their whole first year, passed before this system existed.
+	# This block, plus anything behind it the student has not passed. Whether a
+	# module with no result counts as unpassed is the same institutional question
+	# the prerequisite check asks, so it uses the same answer -- otherwise a
+	# student could be blocked by a module that was never offered back to them.
+	strict = missing_result_blocks()
+	behind = (FAILED, PENDING, NEVER) if strict else (FAILED, PENDING)
+
 	candidates = {course: block for course in curriculum.get(block, ())}
 	for earlier in range(1, block):
 		for course in curriculum.get(earlier, ()):
-			if history.get(course, NEVER) in (FAILED, PENDING):
+			if history.get(course, NEVER) in behind:
 				candidates.setdefault(course, earlier)
 
 	# A co-requisite can be satisfied by a module taken in the same term, so each
@@ -335,7 +339,7 @@ def options_for(student, on=None):
 	alongside = {c for c in candidates if history.get(c, NEVER) != PASSED}
 
 	rows = [
-		_row(course, course_block, block, history, already, rules, alongside)
+		_row(course, course_block, block, history, already, rules, alongside, strict)
 		for course, course_block in candidates.items()
 	]
 	rows.sort(key=lambda row: (row["block"], row["course"]))
@@ -351,8 +355,10 @@ def options_for(student, on=None):
 	}
 
 
-def _row(course, course_block, block, history, already, rules, alongside):
-	blocking, outstanding, unverified = unmet_prerequisites(course, history, alongside, rules)
+def _row(course, course_block, block, history, already, rules, alongside, strict=False):
+	blocking, outstanding, unverified = unmet_prerequisites(
+		course, history, alongside, rules, strict
+	)
 	outcome = history.get(course, NEVER)
 
 	if course in already:
@@ -381,8 +387,10 @@ def _row(course, course_block, block, history, already, rules, alongside):
 		"selectable": status in SELECTABLE,
 		"blocked_by": _codes(blocking),
 		"provisional_on": _codes(outstanding),
-		# Prerequisites this system has no result for, so it cannot confirm them.
-		# Not a block; recorded so the gap can be seen rather than assumed away.
+		# Prerequisites with no result on record, so they cannot be confirmed
+		# either way. Reported rather than assumed away -- and empty when the
+		# institution has chosen to treat silence as a failure, because then they
+		# are in `blocked_by` instead.
 		"unverified": _codes(unverified),
 	}
 

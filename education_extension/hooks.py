@@ -141,16 +141,33 @@ website_route_rules = [
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+# A provisional registration is one taken on a prerequisite whose result had not
+# landed. The moment that result settles — submitted, corrected after submission,
+# or withdrawn — the registration may need to change, so every event that can
+# alter a remark re-checks the student. The work is queued rather than done
+# inline: marking a whole sheet would otherwise pay for it on every row.
+_RESOLVE_PROVISIONAL = {
+	"on_submit": "education_extension.education_extension.registration.on_remark_change",
+	"on_update_after_submit": "education_extension.education_extension.registration.on_remark_change",
+	"on_cancel": "education_extension.education_extension.registration.on_remark_change",
+}
+
+doc_events = {
+	"Academic Remark": _RESOLVE_PROVISIONAL,
+	"Supplementary Academic Remark": _RESOLVE_PROVISIONAL,
+}
 
 # Scheduled Tasks
 # ---------------
+
+# A backstop for the doc events above. They cover the normal path; this catches a
+# result that settled while the queue was down, or a registration that became
+# resolvable because the window closed rather than because anything was marked.
+scheduler_events = {
+	"daily": [
+		"education_extension.education_extension.registration.resolve_provisional_registrations",
+	],
+}
 
 # scheduler_events = {
 # 	"all": [

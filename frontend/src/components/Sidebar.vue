@@ -51,6 +51,7 @@ import {
   UserCheck,
   ArrowLeftToLine,
   BookOpen,
+  ClipboardList,
 } from 'lucide-vue-next'
 
 import UserDropdown from './UserDropdown.vue'
@@ -71,6 +72,11 @@ const links = [
     label: 'Grades',
     to: '/grades',
     icon: GraduationCap,
+  },
+  {
+    label: 'Registration',
+    to: '/registration',
+    icon: ClipboardList,
   },
   {
     label: 'Fees',

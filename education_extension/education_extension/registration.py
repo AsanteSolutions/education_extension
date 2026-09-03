@@ -785,9 +785,14 @@ def _deregister(enrollment, row, blocking):
 
 
 def _report_to_staff(enrollment, row, blocking):
-	"""Leave the registration alone and put the decision in front of a person."""
-	doc = frappe.get_doc("Program Enrollment", enrollment.name)
-	doc.add_comment(
+	"""Leave the registration alone and put the decision in front of a person.
+
+	The comment is the audit trail; the flag is what makes it findable. A comment
+	on a submitted enrolment nobody opens is not a queue, so `custom_needs_review`
+	carries the case into the Registration Status report. The provisional mark
+	comes off at the same time, or the daily sweep would raise it again every day.
+	"""
+	frappe.get_doc("Program Enrollment", enrollment.name).add_comment(
 		"Info",
 		_(
 			"{0} was registered provisionally and {1} has now failed, but the "
@@ -796,7 +801,12 @@ def _report_to_staff(enrollment, row, blocking):
 			"module. Needs a decision."
 		).format(_codes([row.course])[0], ", ".join(_codes(blocking))),
 	)
-	_clear_provisional(row)
+	frappe.db.set_value(
+		"Program Enrollment Course",
+		row.name,
+		{"custom_provisional": 0, "custom_provisional_on": None, "custom_needs_review": 1},
+		update_modified=False,
+	)
 
 
 def _tell_student(enrollment, subject, message):

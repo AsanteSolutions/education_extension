@@ -56,6 +56,8 @@ BLOCKED = "blocked"
 ALREADY_PASSED = "passed"
 AWAITING = "awaiting_result"
 REGISTERED = "registered"
+# Failed, but taught in the other semester, so it cannot be retaken this term.
+DEFERRED = "deferred"
 
 SELECTABLE = frozenset({REQUIRED, CARRIED_OVER, PROVISIONAL})
 
@@ -121,6 +123,24 @@ def curriculum_blocks():
 		if block < blocks.get(row.course, block + 1):
 			blocks[row.course] = block
 	return blocks
+
+
+def carry_over_blocks(block):
+	"""Earlier blocks whose modules may be retaken alongside `block`.
+
+	A module is taught in its own semester and only there. A failed first-semester
+	module cannot be repeated in a second semester — it waits for the next first
+	semester. So carry-overs step back in twos rather than covering everything
+	behind the student, and the eighteen students already holding two enrolments
+	in one term bear this out: every pair is Semester 1 with Semester 3, and none
+	mixes a first-semester block with a second-semester one.
+	"""
+	return list(range(block - 2, 0, -2))
+
+
+def semester_word(block):
+	"""Which semester of the year a block runs in, for a reason line."""
+	return _("first") if block % 2 else _("second")
 
 
 def courses_by_block(blocks=None):
@@ -343,9 +363,16 @@ def options_for(student, on=None):
 			if history.get(course, NEVER) in behind:
 				candidates.setdefault(course, earlier)
 
-	# A co-requisite can be satisfied by a module taken in the same term, so each
-	# module is judged against the whole proposed set rather than one at a time.
-	alongside = {c for c in candidates if history.get(c, NEVER) != PASSED}
+	# Only the blocks that run in this semester can actually be taken now; the
+	# rest are shown so the student can see what is waiting, but they are not on
+	# offer. A co-requisite is satisfied by a module taken in the same term, so it
+	# is judged against exactly that set and no wider.
+	takeable = set(carry_over_blocks(block)) | {block}
+	alongside = {
+		course
+		for course, course_block in candidates.items()
+		if course_block in takeable and history.get(course, NEVER) != PASSED
+	}
 
 	rows = [
 		_row(course, course_block, block, history, already, rules, alongside, strict)
@@ -376,6 +403,15 @@ def _row(course, course_block, block, history, already, rules, alongside, strict
 		status, reason = ALREADY_PASSED, _("Already passed.")
 	elif outcome == PENDING and course_block < block:
 		status, reason = AWAITING, _("Waiting on a supplementary or aegrotat result.")
+	elif course_block < block and course_block % 2 != block % 2:
+		# Taught in the other semester, so it is not on offer now however the
+		# prerequisites read. Shown rather than omitted: it is often what is
+		# blocking something else on the page, and a module that simply vanishes
+		# leaves the student with no way to understand why.
+		status = DEFERRED
+		reason = _("A {0}-semester module. It can only be retaken in a {0} semester.").format(
+			semester_word(course_block)
+		)
 	elif blocking:
 		status = BLOCKED
 		reason = _("Not yet passed: {0}.").format(", ".join(_codes(blocking)))

@@ -223,6 +223,8 @@ const BADGES = {
 	passed: { label: 'Passed', theme: 'green' },
 	awaiting_result: { label: 'Awaiting result', theme: 'gray' },
 	registered: { label: 'Registered', theme: 'green' },
+	// Failed, but taught in the other semester, so not on offer this term.
+	deferred: { label: 'Other semester', theme: 'gray' },
 }
 const badge = (status) => BADGES[status] || { label: status, theme: 'gray' }
 

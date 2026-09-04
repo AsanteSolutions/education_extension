@@ -136,8 +136,36 @@ class TestRegistrationRules(UnitTestCase):
 
 	def test_only_actionable_statuses_are_selectable(self):
 		self.assertEqual(reg.SELECTABLE, {reg.REQUIRED, reg.CARRIED_OVER, reg.PROVISIONAL})
-		for status in (reg.BLOCKED, reg.ALREADY_PASSED, reg.AWAITING, reg.REGISTERED):
+		for status in (
+			reg.BLOCKED,
+			reg.ALREADY_PASSED,
+			reg.AWAITING,
+			reg.REGISTERED,
+			reg.DEFERRED,
+		):
 			self.assertNotIn(status, reg.SELECTABLE)
+
+	def test_carry_overs_stay_in_their_own_semester(self):
+		# A module is taught in its own semester and only there, so a failed
+		# first-semester module waits for the next first semester rather than
+		# being repeated in a second one. Blocks therefore step back in twos.
+		self.assertEqual(reg.carry_over_blocks(1), [])
+		self.assertEqual(reg.carry_over_blocks(2), [])
+		self.assertEqual(reg.carry_over_blocks(3), [1])
+		self.assertEqual(reg.carry_over_blocks(4), [2])
+		self.assertEqual(reg.carry_over_blocks(5), [3, 1])
+		self.assertEqual(reg.carry_over_blocks(6), [4, 2])
+
+		for block in range(1, 7):
+			for earlier in reg.carry_over_blocks(block):
+				self.assertEqual(
+					earlier % 2, block % 2, f"block {earlier} cannot run alongside {block}"
+				)
+
+	def test_a_semester_is_named_for_the_reason_line(self):
+		self.assertEqual(reg.semester_word(1), "first")
+		self.assertEqual(reg.semester_word(3), "first")
+		self.assertEqual(reg.semester_word(4), "second")
 
 	def test_a_students_own_semester_is_not_optional(self):
 		# Carry-overs are the only thing a student may decline.
@@ -319,6 +347,36 @@ class TestRegistrationFlow(IntegrationTestCase):
 		]
 		with self.assertRaises(frappe.ValidationError):
 			reg.register_student(self.student, mandatory[:-1])
+
+	def test_an_off_semester_failure_is_shown_but_not_offered(self):
+		# Block 4 runs in the second semester. A failed block 3 module is a
+		# first-semester module, so it cannot be retaken now -- but it must still
+		# appear, since it is often what is blocking something else on the page.
+		self.remark("ANH2303 - Veterinary Laboratory Diagnostics", "F")
+		rows = {
+			row["course"]: row
+			for group in self.options()["groups"]
+			for row in group["rows"]
+		}
+		deferred = rows.get("ANH2303 - Veterinary Laboratory Diagnostics")
+		self.assertIsNotNone(deferred, "an off-semester failure must still be listed")
+		self.assertEqual(deferred["status"], reg.DEFERRED)
+		self.assertFalse(deferred["selectable"])
+		self.assertIn("first", deferred["reason"])
+
+		with self.assertRaises(frappe.ValidationError):
+			reg.register_student(self.student, [deferred["course"]])
+
+	def test_nothing_offered_comes_from_the_other_semester(self):
+		block = self.options()["block"]
+		for group in self.options()["groups"]:
+			for row in group["rows"]:
+				if row["selectable"]:
+					self.assertEqual(
+						row["block"] % 2,
+						block % 2,
+						f"{row['course']} runs in the other semester",
+					)
 
 	def test_a_blocked_module_is_refused(self):
 		self.remark("ANH2303 - Veterinary Laboratory Diagnostics", "F")

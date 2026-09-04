@@ -693,7 +693,10 @@ def resolve_provisional_registrations(student=None):
 			_report_to_staff(enrollment, row, blocking)
 			tally["reported"] += 1
 
-	frappe.db.commit()
+	# No commit here on purpose. Every real caller already provides one -- the
+	# background job runner commits on success, and so does the scheduler -- and
+	# committing inside the function would break the rollback that test isolation
+	# depends on, silently persisting fixtures.
 	return tally
 
 

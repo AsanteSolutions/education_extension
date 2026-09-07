@@ -16,6 +16,7 @@ also run from a console:
     run_tests()
 """
 
+import json
 import unittest
 
 import frappe
@@ -336,6 +337,44 @@ class TestRegistrationFlow(IntegrationTestCase):
 			frappe.db.count("Course Enrollment", {"program_enrollment": enrollment.name}),
 			len(enrollment.courses),
 		)
+
+	def test_a_student_can_register_as_themselves(self):
+		"""The whole point, and the case every other test here misses.
+
+		`permissions.has_permission` returns True immediately for Administrator,
+		so a write path can be thoroughly tested and still fail for every real
+		user. This one registers through the session endpoint as the student,
+		which is the only way that hole shows up.
+		"""
+		user = frappe.db.get_value("Student", self.student, "user")
+		if not user:
+			self.skipTest("student has no portal user")
+
+		frappe.set_user(user)
+		try:
+			options = reg.my_options()
+			self.assertEqual(options["state"], "open")
+			mandatory = [
+				row["course"]
+				for group in options["groups"]
+				for row in group["rows"]
+				if row["status"] in reg.MANDATORY
+			]
+			created = reg.register(json.dumps(mandatory))
+		finally:
+			frappe.set_user("Administrator")
+
+		self.assertTrue(created["enrollments"])
+		enrollment = frappe.get_doc("Program Enrollment", created["enrollments"][0])
+		self.assertEqual(enrollment.docstatus, 1)
+		# Registering elevates only to submit, so the record stays theirs.
+		self.assertEqual(enrollment.owner, user)
+		self.assertEqual(
+			frappe.db.count("Course Enrollment", {"program_enrollment": enrollment.name}),
+			len(enrollment.courses),
+		)
+		# And the elevation must not leak past the call.
+		self.assertEqual(frappe.session.user, "Administrator")
 
 	def test_a_students_own_semester_cannot_be_left_out(self):
 		result = self.options()

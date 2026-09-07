@@ -634,17 +634,36 @@ def _create_enrollment(student, program, courses, rows, period):
 			},
 		)
 
-	# Registration is a privileged action taken on the student behalf: the Student
-	# role cannot write Program Enrollment, and submitting one creates Course
-	# Enrollment records it cannot write either. The gate is the eligibility check
-	# above, not the role. The flag is global for the request, hence the restore.
-	previous = frappe.flags.ignore_permissions
-	frappe.flags.ignore_permissions = True
+	# Registration is a privileged action taken on the student behalf: the gate is
+	# the eligibility check above, not the role. Granting it needs more than a
+	# flag, because writing this one document sets off three others.
+	#
+	# `Document.has_permission` consults only the flag on the document itself --
+	# `frappe.flags.ignore_permissions` is read nowhere in the document write path
+	# -- and the documents that follow are ones we never touch. Inserting fires
+	# this site's LMS integration script, which saves an LMS Program. Submitting
+	# runs the education app's `create_course_enrollments`, and each Course
+	# Enrollment fires a second LMS script. A student has permission on none of
+	# them, so the write runs elevated.
+	user = frappe.session.user
+	enrollment.flags.ignore_permissions = True
+
+	frappe.set_user("Administrator")
 	try:
 		enrollment.insert()
 		enrollment.submit()
 	finally:
-		frappe.flags.ignore_permissions = previous
+		frappe.set_user(user)
+
+	# Restored afterwards rather than set beforehand: Frappe stamps `owner` from
+	# the session user on every new document and overwrites whatever was there.
+	# Worth the extra write, because owner is how a registrar tells a student who
+	# registered themselves from an enrolment a staff member keyed in -- and with
+	# no approval step, that is the only place the difference is recorded.
+	if user != "Administrator":
+		frappe.db.set_value(
+			"Program Enrollment", enrollment.name, "owner", user, update_modified=False
+		)
 
 	return enrollment.name
 
@@ -788,18 +807,19 @@ def _deregister(enrollment, row, blocking):
 	doc = frappe.get_doc("Program Enrollment", enrollment.name)
 	doc.courses = [course for course in doc.courses if course.name != row.name]
 
-	previous = frappe.flags.ignore_permissions
-	frappe.flags.ignore_permissions = True
-	try:
-		doc.save()
-		for name in frappe.get_all(
-			"Course Enrollment",
-			filters={"program_enrollment": enrollment.name, "course": row.course},
-			pluck="name",
-		):
-			frappe.delete_doc("Course Enrollment", name, ignore_permissions=True)
-	finally:
-		frappe.flags.ignore_permissions = previous
+	# On the document, not `frappe.flags`: the global flag is not consulted in
+	# the document write path. This normally runs from a background job as
+	# Administrator, where it makes no difference -- but it is also reachable
+	# from a request, and then it does.
+	doc.flags.ignore_permissions = True
+	doc.save()
+
+	for name in frappe.get_all(
+		"Course Enrollment",
+		filters={"program_enrollment": enrollment.name, "course": row.course},
+		pluck="name",
+	):
+		frappe.delete_doc("Course Enrollment", name, ignore_permissions=True)
 
 	note = _("{0} was removed: {1} was not passed.").format(
 		_codes([row.course])[0], ", ".join(_codes(blocking))

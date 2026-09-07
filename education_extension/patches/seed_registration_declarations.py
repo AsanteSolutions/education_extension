@@ -8,6 +8,10 @@ somebody already agreed to.
 
 Only fills a field that is empty, so re-running cannot overwrite an amendment.
 
+The blanks the paper form leaves for a signature are placeholders here --
+{student_name}, {id_number}, {student_number} and {date} -- filled in per
+student, so the text reads as a completed document rather than a form.
+
 NOTE: clause 6 of the source document ends mid-sentence -- "...will also be
 transferred to any statutory body for purposes registration," -- and is
 transcribed as it stands rather than completed by guesswork. It needs finishing
@@ -16,7 +20,8 @@ by whoever owns the form.
 
 import frappe
 
-PREREQUISITE_DECLARATION = """<p>I declare that I have met all the pre-requisites of the modules I have
+PREREQUISITE_DECLARATION = """<p>I, <b>{student_name}</b>, ID number <b>{id_number}</b>, student number
+<b>{student_number}</b>, declare that I have met all the pre-requisites of the modules I have
 registered for and all the information furnished in this document is correct, and I give the quality
 assurance office permission to verify it. I understand that if I have given false information I may be
 liable to disciplinary action.</p>"""
@@ -51,13 +56,15 @@ complaint, requests.</li>
 registration, certification, workplace opportunities, verification of qualification and will also be
 transferred to any statutory body for purposes registration,</li>
 </ol>
-<p>By agreeing below I declare and confirm that I have given TARDI consent to collect, process, store
-and utilize my personal information for any of the above mentioned events. I further state that the
+<p>I, <b>{student_name}</b>, ID number <b>{id_number}</b>, student number
+<b>{student_number}</b>, declare and confirm that I have given TARDI consent to collect, process,
+store and utilize my personal information for any of the above mentioned events. I further state that the
 information collected was supplied in a free and fair manner and not at any time did I provide my
 personal information under duress and there was no undue influence from any party. Failure to provide
 my personal information might result in TARDI and any of its stakeholders being unable to render
 services to me, this might affect my academic progress and possibly TARDI’s inability to award me a
-qualification.</p>"""
+qualification.</p>
+<p>Agreed on <b>{date}</b>.</p>"""
 
 FIELDS = {
 	"prerequisite_declaration": PREREQUISITE_DECLARATION,

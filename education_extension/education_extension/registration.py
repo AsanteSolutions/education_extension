@@ -15,7 +15,7 @@ marks happen to be calculated.
 
 import frappe
 from frappe import _
-from frappe.utils import getdate, now, nowdate
+from frappe.utils import escape_html, formatdate, getdate, now, nowdate
 
 from education_extension.education_extension.doctype.registration_period.registration_period import (
 	next_period,
@@ -380,17 +380,63 @@ def options_for(student, on=None):
 		"groups": _grouped(rows),
 		# Sent with the modules so the second step needs no further call, and so
 		# the wording the student is shown is the wording that gets recorded.
-		"declarations": declarations(),
+		"declarations": declarations(student),
 	}
 
 
-def declarations():
-	"""The wording shown at the consent step, from Registration Settings."""
+def declarations(student=None):
+	"""The wording shown at the consent step, from Registration Settings.
+
+	Placeholders are filled in for `student`, so the text reads as a completed
+	document rather than a form with blanks in it — which is what the paper
+	version becomes once it is signed, and what the recorded consent should say.
+	"""
 	settings = frappe.get_cached_doc("Registration Settings")
-	return {
+	wording = {
 		"prerequisites": settings.prerequisite_declaration or "",
 		"popia": settings.popia_consent or "",
 	}
+	if not student:
+		return wording
+
+	values = declaration_values(student)
+	return {key: fill_declaration(text, values) for key, text in wording.items()}
+
+
+def declaration_values(student):
+	"""What each placeholder stands for."""
+	details = frappe.db.get_value(
+		"Student",
+		student,
+		["student_name", "custom_id_number", "custom_student_number"],
+		as_dict=True,
+	) or frappe._dict()
+
+	# The docname is the student number, so it is the last resort for both.
+	number = details.custom_student_number or student
+
+	return {
+		"{student_name}": details.student_name or "",
+		# The form asks for an ID number or a student number, so one stands in for
+		# the other where it is missing.
+		"{id_number}": details.custom_id_number or number,
+		"{student_number}": number,
+		# The date the consent is given. On the page this is the day it was loaded;
+		# on the record it is the day it was agreed, which is the one that counts.
+		"{date}": formatdate(nowdate(), "d MMMM yyyy"),
+	}
+
+
+def fill_declaration(text, values):
+	"""Replacement rather than `str.format`.
+
+	The wording is HTML that staff can edit, and a single stray brace in it would
+	make formatting raise — on a legal declaration, at the moment a student is
+	trying to register.
+	"""
+	for token, value in values.items():
+		text = text.replace(token, escape_html(value))
+	return text
 
 
 def _row(course, course_block, block, history, already, rules, alongside, strict=False):
@@ -614,7 +660,7 @@ def _record_consent(student, period, agreed):
 	if not agreed.get("popia"):
 		frappe.throw(_("You must consent to your personal information being processed."))
 
-	wording = declarations()
+	wording = declarations(student)
 
 	consent = frappe.new_doc("Registration Consent")
 	consent.update(

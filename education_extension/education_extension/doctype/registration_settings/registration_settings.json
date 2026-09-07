@@ -51,17 +51,19 @@
    "label": "Tolerance"
   },
   {
-   "description": "Shown to the student as the second step of registration. Amending the wording does not alter consents already recorded, which keep their own copy.",
+   "description": "Shown to the student as the second step of registration. The placeholders {student_name}, {id_number}, {student_number} and {date} are filled in per student. Amending the wording does not alter consents already recorded, which keep their own copy.",
    "fieldname": "consent_section",
    "fieldtype": "Section Break",
    "label": "Registration Declarations"
   },
   {
+   "description": "Placeholders: {student_name}, {id_number}, {student_number}, {date}.",
    "fieldname": "prerequisite_declaration",
    "fieldtype": "Text Editor",
    "label": "Pre-requisite Declaration"
   },
   {
+   "description": "Placeholders: {student_name}, {id_number}, {student_number}, {date}.",
    "fieldname": "popia_consent",
    "fieldtype": "Text Editor",
    "label": "POPIA Consent"

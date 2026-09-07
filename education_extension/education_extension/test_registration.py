@@ -412,6 +412,74 @@ class TestRegistrationFlow(IntegrationTestCase):
 			if row["status"] in reg.MANDATORY
 		]
 
+	def test_registering_leaves_the_session_intact(self):
+		"""Registering logged the student out.
+
+		The write runs as Administrator, because inserting the enrolment sets off
+		documents a student has no permission on. But `frappe.set_user` does more
+		than change the user: it overwrites `session.sid` with the username and
+		blanks `session.data`. Switching back by user alone left the session
+		unrecognisable, so the next request had no session and the student was
+		out. Harmless in a console or a job, which is where it was first tested.
+		"""
+		session = frappe.local.session
+		before = {
+			"user": session.user,
+			"sid": session.sid,
+			"data": session.data,
+			"form_dict": frappe.local.form_dict,
+		}
+		# A sid that is plainly not a username, so a swap cannot pass unnoticed.
+		session.sid = "a-real-looking-session-id"
+		session.data = frappe._dict(marker="kept")
+		frappe.local.form_dict = frappe._dict(cmd="register")
+		# As the student, which is the case that broke: a console session is
+		# already Administrator, so the swap is invisible there.
+		session.user = frappe.db.get_value("Student", self.student, "user")
+
+		try:
+			reg.register_student(self.student, self.mandatory_modules(), AGREED, SIGNED)
+
+			self.assertEqual(frappe.session.sid, "a-real-looking-session-id")
+			self.assertEqual(frappe.session.data.marker, "kept")
+			self.assertEqual(frappe.local.form_dict.cmd, "register")
+			self.assertEqual(
+				frappe.session.user,
+				frappe.db.get_value("Student", self.student, "user"),
+			)
+		finally:
+			session.sid = before["sid"]
+			session.data = before["data"]
+			session.user = before["user"]
+			frappe.local.form_dict = before["form_dict"]
+
+	def test_the_elevation_restores_everything_it_touches(self):
+		session = frappe.local.session
+		# Restored in a finally: a test that leaves the session pointing at a user
+		# who does not exist takes every test after it down with it, which is
+		# exactly what happened when this was first written.
+		was = (session.user, session.sid, session.data)
+		try:
+			session.user = "someone@example.com"
+			session.sid = "sid-to-keep"
+			session.data = frappe._dict(marker="kept")
+
+			with reg.as_administrator():
+				self.assertEqual(frappe.session.user, "Administrator")
+
+			self.assertEqual(frappe.session.user, "someone@example.com")
+			self.assertEqual(frappe.session.sid, "sid-to-keep")
+			self.assertEqual(frappe.session.data.marker, "kept")
+
+			# And it puts things back even when the block raises.
+			with self.assertRaises(ValueError):
+				with reg.as_administrator():
+					raise ValueError("boom")
+			self.assertEqual(frappe.session.user, "someone@example.com")
+			self.assertEqual(frappe.session.sid, "sid-to-keep")
+		finally:
+			session.user, session.sid, session.data = was
+
 	def test_a_signature_is_required(self):
 		# Ticking a box is agreement; the form asks for a mark as well.
 		with self.assertRaises(frappe.ValidationError):

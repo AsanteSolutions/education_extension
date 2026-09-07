@@ -13,6 +13,8 @@ code is what QA signed off, and reading it keeps registration independent of how
 marks happen to be calculated.
 """
 
+from contextlib import contextmanager
+
 import frappe
 from frappe import _
 from frappe.utils import escape_html, formatdate, getdate, now, nowdate
@@ -699,6 +701,37 @@ def _record_consent(student, period, agreed, signatures):
 	return consent.name
 
 
+@contextmanager
+def as_administrator():
+	"""Run a block as Administrator and put the session back exactly as it was.
+
+	`frappe.set_user` is not safe to call bare inside a request. Besides the user
+	it overwrites `session.sid` with the username, blanks `session.data` and
+	empties `form_dict` — so switching back by user alone leaves the session
+	unrecognisable, and the student is logged out on their next request. It is
+	harmless in a console or a background job, which is exactly where this was
+	first tested and why it looked fine.
+
+	Everything `set_user` clears and this code depends on is captured and put
+	back. Caches it drops (`role_permissions`, `user_perms`) are left to rebuild
+	themselves, which they do on next access.
+	"""
+	session = frappe.local.session
+	was_user = session.user
+	was_sid = session.sid
+	was_data = session.data
+	was_form_dict = frappe.local.form_dict
+
+	frappe.set_user("Administrator")
+	try:
+		yield
+	finally:
+		frappe.set_user(was_user)
+		session.sid = was_sid
+		session.data = was_data
+		frappe.local.form_dict = was_form_dict
+
+
 def _create_enrollment(student, program, courses, rows, period):
 	duplicate = frappe.db.exists(
 		"Program Enrollment",
@@ -745,12 +778,9 @@ def _create_enrollment(student, program, courses, rows, period):
 	user = frappe.session.user
 	enrollment.flags.ignore_permissions = True
 
-	frappe.set_user("Administrator")
-	try:
+	with as_administrator():
 		enrollment.insert()
 		enrollment.submit()
-	finally:
-		frappe.set_user(user)
 
 	# Restored afterwards rather than set beforehand: Frappe stamps `owner` from
 	# the session user on every new document and overwrites whatever was there.

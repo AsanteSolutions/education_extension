@@ -56,8 +56,6 @@ BLOCKED = "blocked"
 ALREADY_PASSED = "passed"
 AWAITING = "awaiting_result"
 REGISTERED = "registered"
-# Failed, but taught in the other semester, so it cannot be retaken this term.
-DEFERRED = "deferred"
 
 SELECTABLE = frozenset({REQUIRED, CARRIED_OVER, PROVISIONAL})
 
@@ -347,7 +345,8 @@ def options_for(student, on=None):
 
 	history = academic_history(student)
 	rules = prerequisite_rules()
-	curriculum = courses_by_block()
+	blocks = curriculum_blocks()
+	curriculum = courses_by_block(blocks)
 	already = registered_courses(student, period.academic_year, period.academic_term)
 
 	# This block, plus anything behind it the student has not passed. Whether a
@@ -357,25 +356,22 @@ def options_for(student, on=None):
 	strict = missing_result_blocks()
 	behind = (FAILED, PENDING, NEVER) if strict else (FAILED, PENDING)
 
+	# Only what can actually be taken this term: this block, and unpassed modules
+	# from the earlier blocks that run in the same semester. A module taught in
+	# the other semester is left off the page entirely -- it cannot be registered
+	# now, so listing it only invites the student to try.
 	candidates = {course: block for course in curriculum.get(block, ())}
-	for earlier in range(1, block):
+	for earlier in carry_over_blocks(block):
 		for course in curriculum.get(earlier, ()):
 			if history.get(course, NEVER) in behind:
 				candidates.setdefault(course, earlier)
 
-	# Only the blocks that run in this semester can actually be taken now; the
-	# rest are shown so the student can see what is waiting, but they are not on
-	# offer. A co-requisite is satisfied by a module taken in the same term, so it
-	# is judged against exactly that set and no wider.
-	takeable = set(carry_over_blocks(block)) | {block}
-	alongside = {
-		course
-		for course, course_block in candidates.items()
-		if course_block in takeable and history.get(course, NEVER) != PASSED
-	}
+	# A co-requisite is satisfied by a module taken in the same term, and the
+	# candidate set is now exactly that, so it is judged against all of it.
+	alongside = {c for c in candidates if history.get(c, NEVER) != PASSED}
 
 	rows = [
-		_row(course, course_block, block, history, already, rules, alongside, strict)
+		_row(course, course_block, block, history, already, rules, alongside, strict, blocks)
 		for course, course_block in candidates.items()
 	]
 	rows.sort(key=lambda row: (row["block"], row["course"]))
@@ -391,7 +387,7 @@ def options_for(student, on=None):
 	}
 
 
-def _row(course, course_block, block, history, already, rules, alongside, strict=False):
+def _row(course, course_block, block, history, already, rules, alongside, strict=False, blocks=None):
 	blocking, outstanding, unverified = unmet_prerequisites(
 		course, history, alongside, rules, strict
 	)
@@ -403,18 +399,24 @@ def _row(course, course_block, block, history, already, rules, alongside, strict
 		status, reason = ALREADY_PASSED, _("Already passed.")
 	elif outcome == PENDING and course_block < block:
 		status, reason = AWAITING, _("Waiting on a supplementary or aegrotat result.")
-	elif course_block < block and course_block % 2 != block % 2:
-		# Taught in the other semester, so it is not on offer now however the
-		# prerequisites read. Shown rather than omitted: it is often what is
-		# blocking something else on the page, and a module that simply vanishes
-		# leaves the student with no way to understand why.
-		status = DEFERRED
-		reason = _("A {0}-semester module. It can only be retaken in a {0} semester.").format(
-			semester_word(course_block)
-		)
 	elif blocking:
 		status = BLOCKED
 		reason = _("Not yet passed: {0}.").format(", ".join(_codes(blocking)))
+		# The blocker itself is not on this page when it belongs to the other
+		# semester, so the reason has to carry that: otherwise the student is told
+		# a module is blocked by something they cannot see and cannot act on this
+		# term, and reads it as a mistake.
+		elsewhere = sorted(
+			{
+				(blocks or {}).get(other)
+				for other in blocking
+				if (blocks or {}).get(other) and (blocks or {})[other] % 2 != block % 2
+			}
+		)
+		if elsewhere:
+			reason += " " + _("Only offered in the {0} semester.").format(
+				semester_word(elsewhere[0])
+			)
 	elif outstanding:
 		status = PROVISIONAL
 		reason = _("Provisional: {0} has no final result yet.").format(", ".join(_codes(outstanding)))

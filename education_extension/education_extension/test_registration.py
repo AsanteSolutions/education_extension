@@ -31,6 +31,14 @@ PROGRAM = "Diploma in Animal Health Semester {0}"
 # Both declarations ticked, which is what the consent step sends.
 AGREED = {"prerequisites": True, "popia": True}
 
+# A drawn mark, as the pad produces it: a PNG data URI. One pixel is enough.
+SIGNED = {
+	"student": (
+		"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+		"AAAADUlEQVR42mP8z8AAAwAB/wFDkQvzAAAAAElFTkSuQmCC"
+	)
+}
+
 
 class TestRegistrationRules(UnitTestCase):
 	"""The rules, with hand-built inputs and no records involved."""
@@ -245,6 +253,17 @@ class TestRegistrationFlow(IntegrationTestCase):
 				where other.student = pe.student and other.docstatus = 1
 				  and other.academic_term = %(term)s
 			  )
+			  -- Registering is impossible for a student whose student_email_id is
+			  -- not a User: this site's LMS script links an LMS Program Member by
+			  -- that field, the link fails validation, and the enrolment insert
+			  -- aborts with it. 22 of 189 students are in that state, so a bare
+			  -- query lands on one sooner or later and the failure looks like a
+			  -- registration bug rather than the data problem it is.
+			  and exists (
+				select 1 from tabStudent s
+				join tabUser u on u.name = s.student_email_id
+				where s.name = pe.student
+			  )
 			order by pe.student
 			limit 1
 			""",
@@ -253,6 +272,21 @@ class TestRegistrationFlow(IntegrationTestCase):
 		if not candidates:
 			self.skipTest("no unregistered Semester 3 student to progress")
 		self.student = candidates[0][0]
+
+		# This site has a Server Script on Program Enrollment that pushes the
+		# student into an LMS Program on before_insert, and the LMS Program refuses
+		# a member it already has -- so a second registration for the same
+		# programme aborts. Worse, that write escapes the rollback: the first test
+		# to register would otherwise leave the membership behind and every later
+		# one in the run would fail on it. Cleared at the start of each test, which
+		# is order-independent, unlike a cleanup.
+		# Keyed on student_email_id, which is what the script links the member by --
+		# not on `user`, which is a different field and happens to hold the same
+		# value for most but not all students here.
+		for field in ("student_email_id", "user"):
+			member = frappe.db.get_value("Student", self.student, field)
+			if member:
+				frappe.db.delete("LMS Program Member", {"member": member})
 
 		frappe.db.delete("Registration Period", {"academic_term": self.term})
 		self.period = frappe.get_doc(
@@ -316,7 +350,7 @@ class TestRegistrationFlow(IntegrationTestCase):
 			if row["status"] in reg.MANDATORY
 		]
 
-		created = reg.register_student(self.student, mandatory, AGREED)
+		created = reg.register_student(self.student, mandatory, AGREED, SIGNED)
 		self.assertTrue(created["enrollments"])
 
 		enrollment = frappe.get_doc("Program Enrollment", created["enrollments"][0])
@@ -352,7 +386,9 @@ class TestRegistrationFlow(IntegrationTestCase):
 				for row in group["rows"]
 				if row["status"] in reg.MANDATORY
 			]
-			created = reg.register(json.dumps(mandatory), json.dumps(AGREED))
+			created = reg.register(
+				json.dumps(mandatory), json.dumps(AGREED), json.dumps(SIGNED)
+			)
 		finally:
 			frappe.set_user("Administrator")
 
@@ -376,6 +412,67 @@ class TestRegistrationFlow(IntegrationTestCase):
 			if row["status"] in reg.MANDATORY
 		]
 
+	def test_a_signature_is_required(self):
+		# Ticking a box is agreement; the form asks for a mark as well.
+		with self.assertRaises(frappe.ValidationError):
+			reg.register_student(self.student, self.mandatory_modules(), AGREED, {})
+
+		self.assertFalse(reg.registered_courses(self.student, "2026", self.term))
+
+	def test_only_a_drawn_mark_counts_as_a_signature(self):
+		from education_extension.education_extension.doctype.registration_consent import (
+			registration_consent as consent_doctype,
+		)
+
+		# The field is fed straight from a request, so what arrives has to look
+		# like an image and be small enough to be one.
+		for value in (
+			"scribble",
+			"data:text/html;base64,YWJj",
+			"data:image/png;base64," + "A" * (consent_doctype.SIGNATURE_LIMIT + 1),
+		):
+			with self.assertRaises(frappe.ValidationError, msg=value[:40]):
+				consent_doctype.validate_signature(value, "Signature")
+
+		consent_doctype.validate_signature(SIGNED["student"], "Signature")
+
+	def test_a_guardian_signature_needs_a_name_and_the_reverse(self):
+		# Half a countersignature is not one: a name with no mark is not signed,
+		# and a mark with no name cannot be attributed to anybody.
+		for half in (
+			{"guardian_name": "A Parent"},
+			{"guardian": SIGNED["student"]},
+		):
+			with self.assertRaises(frappe.ValidationError, msg=repr(half)):
+				reg.register_student(
+					self.student, self.mandatory_modules(), AGREED, dict(SIGNED, **half)
+				)
+
+	def test_a_guardian_countersignature_is_recorded(self):
+		signatures = dict(
+			SIGNED, guardian_name="A Parent", guardian=SIGNED["student"]
+		)
+		result = reg.register_student(
+			self.student, self.mandatory_modules(), AGREED, signatures
+		)
+
+		consent = frappe.get_doc("Registration Consent", result["consent"])
+		self.assertTrue(consent.student_signature)
+		self.assertTrue(consent.signed_by_guardian)
+		self.assertEqual(consent.guardian_name, "A Parent")
+		self.assertTrue(consent.guardian_signature)
+
+	def test_the_guardian_flag_follows_the_signature(self):
+		# Set from whether a guardian actually signed, so the flag cannot claim a
+		# countersignature that is not there.
+		result = reg.register_student(
+			self.student, self.mandatory_modules(), AGREED, SIGNED
+		)
+		consent = frappe.get_doc("Registration Consent", result["consent"])
+		self.assertFalse(consent.signed_by_guardian)
+		self.assertFalse(consent.guardian_name)
+		self.assertFalse(consent.guardian_signature)
+
 	def test_neither_declaration_can_be_skipped(self):
 		# Two separate agreements on the paper form, and neither implies the other:
 		# one is about academic standing, the other is consent to process personal
@@ -387,7 +484,7 @@ class TestRegistrationFlow(IntegrationTestCase):
 			{"prerequisites": True, "popia": False},
 		):
 			with self.assertRaises(frappe.ValidationError, msg=repr(partial)):
-				reg.register_student(self.student, self.mandatory_modules(), partial)
+				reg.register_student(self.student, self.mandatory_modules(), partial, SIGNED)
 
 		# And nothing was created on the way to refusing.
 		self.assertFalse(reg.registered_courses(self.student, "2026", self.term))
@@ -396,7 +493,7 @@ class TestRegistrationFlow(IntegrationTestCase):
 		)
 
 	def test_the_consent_records_what_was_shown(self):
-		reg.register_student(self.student, self.mandatory_modules(), AGREED)
+		reg.register_student(self.student, self.mandatory_modules(), AGREED, SIGNED)
 
 		name = frappe.db.get_value(
 			"Registration Consent",
@@ -474,7 +571,7 @@ class TestRegistrationFlow(IntegrationTestCase):
 		self.assertNotIn("<script>", filled)
 
 	def test_the_consent_records_the_filled_wording(self):
-		reg.register_student(self.student, self.mandatory_modules(), AGREED)
+		reg.register_student(self.student, self.mandatory_modules(), AGREED, SIGNED)
 		name = frappe.db.get_value(
 			"Registration Consent",
 			{"student": self.student, "academic_term": self.term, "docstatus": 1},
@@ -521,7 +618,7 @@ class TestRegistrationFlow(IntegrationTestCase):
 			if row["status"] in reg.MANDATORY
 		]
 		with self.assertRaises(frappe.ValidationError):
-			reg.register_student(self.student, mandatory[:-1], AGREED)
+			reg.register_student(self.student, mandatory[:-1], AGREED, SIGNED)
 
 	def test_an_off_semester_module_is_not_listed_at_all(self):
 		# Block 4 runs in the second semester, so a failed block 3 module cannot be
@@ -538,7 +635,7 @@ class TestRegistrationFlow(IntegrationTestCase):
 
 		# And it cannot be smuggled in by a stale or hand-built request.
 		with self.assertRaises(frappe.ValidationError):
-			reg.register_student(self.student, [failed], AGREED)
+			reg.register_student(self.student, [failed], AGREED, SIGNED)
 
 	def test_a_blocker_is_named_even_when_it_is_not_on_the_page(self):
 		# ANH2403 needs ANH2303, a first-semester module. It stays blocked, and the
@@ -575,7 +672,7 @@ class TestRegistrationFlow(IntegrationTestCase):
 
 		mandatory = [c for c, r in rows.items() if r["status"] in reg.MANDATORY]
 		with self.assertRaises(frappe.ValidationError):
-			reg.register_student(self.student, mandatory + blocked[:1], AGREED)
+			reg.register_student(self.student, mandatory + blocked[:1], AGREED, SIGNED)
 
 	def test_registering_twice_is_refused_and_the_record_is_shown(self):
 		result = self.options()
@@ -585,7 +682,7 @@ class TestRegistrationFlow(IntegrationTestCase):
 			for row in group["rows"]
 			if row["status"] in reg.MANDATORY
 		]
-		reg.register_student(self.student, mandatory, AGREED)
+		reg.register_student(self.student, mandatory, AGREED, SIGNED)
 
 		# Once registered the page becomes a record, not another offer -- and the
 		# block calculation must not read the new enrolment as progress.
@@ -594,7 +691,7 @@ class TestRegistrationFlow(IntegrationTestCase):
 		self.assertEqual(len(after["modules"]), len(mandatory))
 
 		with self.assertRaises(frappe.ValidationError):
-			reg.register_student(self.student, mandatory, AGREED)
+			reg.register_student(self.student, mandatory, AGREED, SIGNED)
 
 	def registered_provisionally(self):
 		"""Register with one prerequisite pending, and return the provisional set."""
@@ -608,7 +705,7 @@ class TestRegistrationFlow(IntegrationTestCase):
 		provisional = [c for c, r in rows.items() if r["status"] == reg.PROVISIONAL]
 		self.assertTrue(provisional, "expected a provisional module to test with")
 
-		reg.register_student(self.student, mandatory, AGREED)
+		reg.register_student(self.student, mandatory, AGREED, SIGNED)
 		return provisional
 
 	def settle_supplementary(self, code):

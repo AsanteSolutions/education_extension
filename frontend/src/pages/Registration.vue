@@ -35,7 +35,6 @@
 				</p>
 			</div>
 
-			<!-- Open: confirm the block, choose among the carry-overs. -->
 			<div v-else-if="data.state === 'open'">
 				<div class="mb-1 text-lg font-semibold text-gray-900">
 					Register for {{ data.period.academic_term }}
@@ -45,102 +44,171 @@
 					{{ data.period.last_date_to_register }}
 				</div>
 
+				<!-- Two steps, both named up front, so the student knows a declaration
+				     is coming rather than meeting it as a surprise at the end. -->
+				<div class="mb-5 flex items-center gap-2 text-sm">
+					<span
+						v-for="(name, index) in ['Choose modules', 'Declarations']"
+						:key="name"
+						class="flex items-center gap-2"
+					>
+						<span
+							class="grid h-5 w-5 place-items-center rounded-full text-xs font-medium"
+							:class="
+								step === index + 1
+									? 'bg-gray-900 text-white'
+									: 'bg-gray-200 text-gray-600'
+							"
+						>
+							{{ index + 1 }}
+						</span>
+						<span :class="step === index + 1 ? 'text-gray-900' : 'text-gray-500'">
+							{{ name }}
+						</span>
+						<FeatherIcon
+							v-if="index === 0"
+							name="chevron-right"
+							class="h-4 w-4 text-gray-400"
+						/>
+					</span>
+				</div>
+
 				<Alert v-if="data.fee_block" class="mb-4" title="Registration is blocked">
 					There is {{ data.fee_block }} outstanding on your account. Settle it with the
 					finance office to register.
 				</Alert>
 
-				<div v-for="group in data.groups" :key="group.block" class="mb-5">
-					<div class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-						{{ group.label }}
-					</div>
-					<div class="divide-y rounded border">
-						<div
-							v-for="row in group.rows"
-							:key="row.course"
-							class="flex items-start gap-3 px-4 py-3"
-							:class="{ 'bg-gray-50': !row.selectable }"
-						>
-							<!-- A mandatory row is shown ticked and locked rather than hidden: the
-							     student should see everything the term commits them to. -->
-							<Checkbox
-								v-if="row.selectable"
-								:modelValue="chosen.has(row.course)"
-								:disabled="isMandatory(row) || !!data.fee_block"
-								class="mt-0.5"
-								@update:modelValue="toggle(row.course)"
-							/>
-							<span v-else class="mt-1 w-4 shrink-0" />
+				<!-- Step 1: what they will be taking. -->
+				<template v-if="step === 1">
+					<div v-for="group in data.groups" :key="group.block" class="mb-5">
+						<div class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+							{{ group.label }}
+						</div>
+						<div class="divide-y rounded border">
+							<div
+								v-for="row in group.rows"
+								:key="row.course"
+								class="flex items-start gap-3 px-4 py-3"
+								:class="{ 'bg-gray-50': !row.selectable }"
+							>
+								<!-- A mandatory row is shown ticked and locked rather than hidden:
+								     the student should see everything the term commits them to. -->
+								<Checkbox
+									v-if="row.selectable"
+									:modelValue="chosen.has(row.course)"
+									:disabled="isMandatory(row) || !!data.fee_block"
+									class="mt-0.5"
+									@update:modelValue="toggle(row.course)"
+								/>
+								<span v-else class="mt-1 w-4 shrink-0" />
 
-							<div class="min-w-0 flex-1">
-								<div class="flex flex-wrap items-center gap-2">
-									<span
-										class="text-sm"
-										:class="row.selectable ? 'text-gray-900' : 'text-gray-500'"
-									>
-										{{ row.course }}
-									</span>
-									<Badge :theme="badge(row.status).theme" variant="subtle">
-										{{ badge(row.status).label }}
-									</Badge>
-								</div>
-								<div v-if="row.reason" class="mt-0.5 text-xs text-gray-600">
-									{{ row.reason }}
-								</div>
-								<!-- Said plainly, because it explains why a module is offered
-								     despite a prerequisite that cannot be confirmed. -->
-								<div v-if="row.unverified.length" class="mt-0.5 text-xs text-gray-500">
-									No result on record for {{ row.unverified.join(', ') }}.
+								<div class="min-w-0 flex-1">
+									<div class="flex flex-wrap items-center gap-2">
+										<span
+											class="text-sm"
+											:class="row.selectable ? 'text-gray-900' : 'text-gray-500'"
+										>
+											{{ row.course }}
+										</span>
+										<Badge :theme="badge(row.status).theme" variant="subtle">
+											{{ badge(row.status).label }}
+										</Badge>
+									</div>
+									<div v-if="row.reason" class="mt-0.5 text-xs text-gray-600">
+										{{ row.reason }}
+									</div>
+									<!-- Said plainly, because it explains why a module is offered
+									     despite a prerequisite that cannot be confirmed. -->
+									<div v-if="row.unverified.length" class="mt-0.5 text-xs text-gray-500">
+										No result on record for {{ row.unverified.join(', ') }}.
+									</div>
 								</div>
 							</div>
 						</div>
 					</div>
-				</div>
 
-				<div class="flex items-center justify-between gap-4 border-t pt-4">
-					<span class="text-sm text-gray-600">
-						{{ chosen.size }} {{ chosen.size === 1 ? 'module' : 'modules' }} selected
-					</span>
-					<Button
-						variant="solid"
-						:disabled="!chosen.size || !!data.fee_block"
-						@click="confirming = true"
-					>
-						Register
-					</Button>
-				</div>
-
-				<!-- Registration is final, so the last step is deliberate rather than a
-				     single click that cannot be taken back. -->
-				<Dialog
-					v-model="confirming"
-					:options="{ title: 'Confirm your registration' }"
-				>
-					<template #body-content>
-						<p class="mb-3 text-p-base text-gray-700">
-							You are registering for these
-							{{ chosen.size }} {{ chosen.size === 1 ? 'module' : 'modules' }}:
-						</p>
-						<ul class="mb-4 list-inside list-disc text-p-base text-gray-800">
-							<li v-for="course in sortedChosen" :key="course">{{ course }}</li>
-						</ul>
-						<p class="text-p-base font-medium text-gray-900">
-							This cannot be changed once submitted. Speak to the academic office if
-							you need it altered afterwards.
-						</p>
-						<ErrorMessage class="mt-3" :message="submission.error" />
-					</template>
-					<template #actions>
+					<div class="flex items-center justify-between gap-4 border-t pt-4">
+						<span class="text-sm text-gray-600">
+							{{ chosen.size }} {{ chosen.size === 1 ? 'module' : 'modules' }} selected
+						</span>
 						<Button
-							class="w-full"
 							variant="solid"
-							:loading="submission.loading"
-							@click="submit"
+							:disabled="!chosen.size || !!data.fee_block"
+							@click="step = 2"
 						>
-							Confirm registration
+							Continue
 						</Button>
-					</template>
-				</Dialog>
+					</div>
+				</template>
+
+				<!-- Step 2: what they are agreeing to, and the act of registering. The
+				     modules are restated here so the declaration is not made against a
+				     list the student can no longer see. -->
+				<template v-else>
+					<div class="mb-5">
+						<div class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+							Registering for {{ sortedChosen.length }}
+							{{ sortedChosen.length === 1 ? 'module' : 'modules' }}
+						</div>
+						<div class="divide-y rounded border">
+							<div
+								v-for="course in sortedChosen"
+								:key="course"
+								class="px-4 py-2 text-sm text-gray-900"
+							>
+								{{ course }}
+							</div>
+						</div>
+					</div>
+
+					<div class="mb-5 rounded border">
+						<div class="border-b bg-gray-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+							Pre-requisite declaration
+						</div>
+						<div class="prose-sm px-4 py-3 text-sm text-gray-800" v-html="data.declarations.prerequisites" />
+						<div class="border-t px-4 py-3">
+							<Checkbox
+								v-model="agreed.prerequisites"
+								label="I agree to the declaration above"
+							/>
+						</div>
+					</div>
+
+					<div class="mb-5 rounded border">
+						<div class="border-b bg-gray-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+							Protection of Personal Information
+						</div>
+						<div
+							class="prose-sm max-h-80 overflow-y-auto px-4 py-3 text-sm text-gray-800"
+							v-html="data.declarations.popia"
+						/>
+						<div class="border-t px-4 py-3">
+							<Checkbox
+								v-model="agreed.popia"
+								label="I give the consent described above"
+							/>
+						</div>
+					</div>
+
+					<ErrorMessage class="mb-3" :message="submission.error" />
+
+					<div class="flex items-center justify-between gap-4 border-t pt-4">
+						<Button variant="subtle" @click="step = 1">Back</Button>
+						<div class="flex items-center gap-3">
+							<span class="text-sm text-gray-600">
+								Registering cannot be undone.
+							</span>
+							<Button
+								variant="solid"
+								:disabled="!bothAgreed"
+								:loading="submission.loading"
+								@click="submit"
+							>
+								Register
+							</Button>
+						</div>
+					</div>
+				</template>
 			</div>
 		</template>
 	</div>
@@ -152,15 +220,16 @@ import {
 	Badge,
 	Button,
 	Checkbox,
-	Dialog,
 	ErrorMessage,
+	FeatherIcon,
 	createResource,
 } from 'frappe-ui'
 import { computed, reactive, ref, watch } from 'vue'
 import MissingData from '@/components/MissingData.vue'
 
 // The endpoint is session-scoped, so the page never names a student. Everything
-// on screen comes from this one response.
+// on screen comes from this one response, including the declaration wording —
+// which means the text shown is the text the server records as agreed.
 const options = createResource({
 	url: 'education_extension.education_extension.registration.my_options',
 	auto: true,
@@ -169,10 +238,15 @@ const options = createResource({
 
 const data = computed(() => options.data)
 
+// 1 = choose modules, 2 = declarations.
+const step = ref(1)
+
 // Course names the student is registering for. A Set because the only questions
 // asked of it are membership and size.
 const chosen = reactive(new Set())
-const confirming = ref(false)
+
+const agreed = reactive({ prerequisites: false, popia: false })
+const bothAgreed = computed(() => agreed.prerequisites && agreed.popia)
 
 // Mandatory rows are the ones the student cannot opt out of: their own semester,
 // including any module offered provisionally.
@@ -197,8 +271,8 @@ const toggle = (course) => {
 	else chosen.add(course)
 }
 
-// Sorted for the confirmation dialog: course names begin with the module code,
-// so this reads in curriculum order.
+// Sorted for the review list: course names begin with the module code, so this
+// reads in curriculum order.
 const sortedChosen = computed(() => [...chosen].sort())
 
 const hasProvisional = computed(() =>
@@ -232,19 +306,28 @@ const submission = createResource({
 	// so the page reloads from it rather than assuming the request succeeded as
 	// sent.
 	onSuccess: () => {
-		confirming.value = false
+		step.value = 1
 		options.reload()
 	},
 })
 
-const submit = () => submission.submit({ courses: sortedChosen.value })
+const submit = () =>
+	submission.submit({
+		courses: sortedChosen.value,
+		// Sent as what the student actually ticked rather than a single flag: the
+		// server records the two declarations separately, as the paper form does.
+		declarations: { prerequisites: agreed.prerequisites, popia: agreed.popia },
+	})
 
-// A reload after registering returns a different state, and the selection built
-// for the previous one no longer means anything.
+// A reload after registering returns a different state, and neither the
+// selection nor the agreements built for the previous one still mean anything.
 watch(
 	() => data.value?.state,
 	(state) => {
-		if (state !== 'open') chosen.clear()
+		if (state === 'open') return
+		chosen.clear()
+		agreed.prerequisites = false
+		agreed.popia = false
 	},
 )
 </script>

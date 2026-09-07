@@ -10,7 +10,10 @@
   "missing_result_policy",
   "fees_section",
   "block_on_outstanding_fees",
-  "outstanding_fee_tolerance"
+  "outstanding_fee_tolerance",
+  "consent_section",
+  "prerequisite_declaration",
+  "popia_consent"
  ],
  "fields": [
   {
@@ -46,6 +49,22 @@
    "fieldname": "outstanding_fee_tolerance",
    "fieldtype": "Currency",
    "label": "Tolerance"
+  },
+  {
+   "description": "Shown to the student as the second step of registration. Amending the wording does not alter consents already recorded, which keep their own copy.",
+   "fieldname": "consent_section",
+   "fieldtype": "Section Break",
+   "label": "Registration Declarations"
+  },
+  {
+   "fieldname": "prerequisite_declaration",
+   "fieldtype": "Text Editor",
+   "label": "Pre-requisite Declaration"
+  },
+  {
+   "fieldname": "popia_consent",
+   "fieldtype": "Text Editor",
+   "label": "POPIA Consent"
   }
  ],
  "index_web_pages_for_search": 1,

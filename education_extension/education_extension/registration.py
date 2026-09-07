@@ -15,7 +15,7 @@ marks happen to be calculated.
 
 import frappe
 from frappe import _
-from frappe.utils import getdate, nowdate
+from frappe.utils import getdate, now, nowdate
 
 from education_extension.education_extension.doctype.registration_period.registration_period import (
 	next_period,
@@ -378,6 +378,18 @@ def options_for(student, on=None):
 		"program": program,
 		"fee_block": fee_block(student),
 		"groups": _grouped(rows),
+		# Sent with the modules so the second step needs no further call, and so
+		# the wording the student is shown is the wording that gets recorded.
+		"declarations": declarations(),
+	}
+
+
+def declarations():
+	"""The wording shown at the consent step, from Registration Settings."""
+	settings = frappe.get_cached_doc("Registration Settings")
+	return {
+		"prerequisites": settings.prerequisite_declaration or "",
+		"popia": settings.popia_consent or "",
 	}
 
 
@@ -510,8 +522,12 @@ MANDATORY = frozenset({REQUIRED, PROVISIONAL})
 
 
 @frappe.whitelist()
-def register(courses):
-	"""Register the logged-in student. Final on submission — there is no draft."""
+def register(courses, declarations=None):
+	"""Register the logged-in student. Final on submission — there is no draft.
+
+	`declarations` carries the two agreements from the consent step, as
+	{"prerequisites": true, "popia": true}. Both are required.
+	"""
 	from education_extension.education_extension.api import _current_user_student
 
 	student = _current_user_student()
@@ -520,10 +536,13 @@ def register(courses):
 
 	if isinstance(courses, str):
 		courses = frappe.parse_json(courses)
-	return register_student(student, list(courses or ()))
+	if isinstance(declarations, str):
+		declarations = frappe.parse_json(declarations)
+
+	return register_student(student, list(courses or ()), declarations or {})
 
 
-def register_student(student, courses):
+def register_student(student, courses, agreed=None):
 	"""Create and submit the enrolments for `courses`, returning what was made.
 
 	Eligibility is recomputed here rather than trusted from the request. The page
@@ -575,12 +594,48 @@ def register_student(student, courses):
 			frappe.throw(_("No programme offers {0}.").format(_codes([course])[0]))
 		grouped.setdefault(program, []).append(course)
 
+	# Recorded before anything is enrolled, so a registration cannot exist
+	# without the consent that permitted it. Both are in the one transaction, so
+	# a failure at either end leaves neither.
+	consent = _record_consent(student, options["period"], agreed or {})
+
 	created = [
 		_create_enrollment(student, program, grouped[program], rows, options["period"])
 		for program in sorted(grouped)
 	]
 
-	return {"enrollments": created, "courses": chosen}
+	return {"enrollments": created, "courses": chosen, "consent": consent}
+
+
+def _record_consent(student, period, agreed):
+	"""Store what the student agreed to, and refuse to proceed without it."""
+	if not agreed.get("prerequisites"):
+		frappe.throw(_("You must declare that you meet the pre-requisites of these modules."))
+	if not agreed.get("popia"):
+		frappe.throw(_("You must consent to your personal information being processed."))
+
+	wording = declarations()
+
+	consent = frappe.new_doc("Registration Consent")
+	consent.update(
+		{
+			"student": student,
+			"academic_year": period["academic_year"],
+			"academic_term": period["academic_term"],
+			"consented_at": now(),
+			"ip_address": frappe.local.request_ip,
+			"prerequisites_declared": 1,
+			"popia_consented": 1,
+			# Snapshotted, not referenced: the institution can amend the wording,
+			# and this record has to keep saying what this student was shown.
+			"declaration_text": wording["prerequisites"],
+			"consent_text": wording["popia"],
+		}
+	)
+	consent.flags.ignore_permissions = True
+	consent.insert()
+	consent.submit()
+	return consent.name
 
 
 def _create_enrollment(student, program, courses, rows, period):

@@ -28,6 +28,9 @@ from education_extension.patches import seed_course_prerequisites as seed
 
 PROGRAM = "Diploma in Animal Health Semester {0}"
 
+# Both declarations ticked, which is what the consent step sends.
+AGREED = {"prerequisites": True, "popia": True}
+
 
 class TestRegistrationRules(UnitTestCase):
 	"""The rules, with hand-built inputs and no records involved."""
@@ -313,7 +316,7 @@ class TestRegistrationFlow(IntegrationTestCase):
 			if row["status"] in reg.MANDATORY
 		]
 
-		created = reg.register_student(self.student, mandatory)
+		created = reg.register_student(self.student, mandatory, AGREED)
 		self.assertTrue(created["enrollments"])
 
 		enrollment = frappe.get_doc("Program Enrollment", created["enrollments"][0])
@@ -349,7 +352,7 @@ class TestRegistrationFlow(IntegrationTestCase):
 				for row in group["rows"]
 				if row["status"] in reg.MANDATORY
 			]
-			created = reg.register(json.dumps(mandatory))
+			created = reg.register(json.dumps(mandatory), json.dumps(AGREED))
 		finally:
 			frappe.set_user("Administrator")
 
@@ -365,6 +368,87 @@ class TestRegistrationFlow(IntegrationTestCase):
 		# And the elevation must not leak past the call.
 		self.assertEqual(frappe.session.user, "Administrator")
 
+	def mandatory_modules(self):
+		return [
+			row["course"]
+			for group in self.options()["groups"]
+			for row in group["rows"]
+			if row["status"] in reg.MANDATORY
+		]
+
+	def test_neither_declaration_can_be_skipped(self):
+		# Two separate agreements on the paper form, and neither implies the other:
+		# one is about academic standing, the other is consent to process personal
+		# information. Half of it is not consent.
+		for partial in (
+			{},
+			{"prerequisites": True},
+			{"popia": True},
+			{"prerequisites": True, "popia": False},
+		):
+			with self.assertRaises(frappe.ValidationError, msg=repr(partial)):
+				reg.register_student(self.student, self.mandatory_modules(), partial)
+
+		# And nothing was created on the way to refusing.
+		self.assertFalse(reg.registered_courses(self.student, "2026", self.term))
+		self.assertFalse(
+			frappe.db.exists("Registration Consent", {"student": self.student, "docstatus": 1})
+		)
+
+	def test_the_consent_records_what_was_shown(self):
+		reg.register_student(self.student, self.mandatory_modules(), AGREED)
+
+		name = frappe.db.get_value(
+			"Registration Consent",
+			{"student": self.student, "academic_term": self.term, "docstatus": 1},
+		)
+		self.assertTrue(name, "registering must leave a consent on record")
+
+		consent = frappe.get_doc("Registration Consent", name)
+		self.assertEqual(consent.docstatus, 1, "a consent record should be immutable")
+		self.assertTrue(consent.prerequisites_declared)
+		self.assertTrue(consent.popia_consented)
+		self.assertTrue(consent.consented_at)
+
+		# Snapshotted, not referenced: amending the wording afterwards must not
+		# rewrite what this student agreed to.
+		wording = reg.declarations()
+		self.assertEqual(consent.declaration_text, wording["prerequisites"])
+		self.assertEqual(consent.consent_text, wording["popia"])
+
+		frappe.db.set_single_value("Registration Settings", "popia_consent", "<p>Amended.</p>")
+		frappe.clear_cache()
+		self.assertNotEqual(
+			frappe.db.get_value("Registration Consent", name, "consent_text"), "<p>Amended.</p>"
+		)
+
+	def test_the_wording_reaches_the_page(self):
+		# The page renders what the server will record, so it comes down with the
+		# modules rather than being fetched or hard-coded in the frontend.
+		options = self.options()
+		self.assertIn("declarations", options)
+		self.assertTrue(options["declarations"]["prerequisites"].strip())
+		self.assertTrue(options["declarations"]["popia"].strip())
+
+	def test_a_consent_cannot_be_recorded_half_agreed(self):
+		# Guarding the doctype itself, not just the endpoint: a consent written by
+		# any other route has to be a whole one too.
+		consent = frappe.get_doc(
+			{
+				"doctype": "Registration Consent",
+				"student": self.student,
+				"academic_year": "2026",
+				"academic_term": self.term,
+				"consented_at": nowdate(),
+				"prerequisites_declared": 1,
+				"popia_consented": 0,
+				"declaration_text": "<p>x</p>",
+				"consent_text": "<p>y</p>",
+			}
+		)
+		with self.assertRaises(frappe.ValidationError):
+			consent.insert()
+
 	def test_a_students_own_semester_cannot_be_left_out(self):
 		result = self.options()
 		mandatory = [
@@ -374,7 +458,7 @@ class TestRegistrationFlow(IntegrationTestCase):
 			if row["status"] in reg.MANDATORY
 		]
 		with self.assertRaises(frappe.ValidationError):
-			reg.register_student(self.student, mandatory[:-1])
+			reg.register_student(self.student, mandatory[:-1], AGREED)
 
 	def test_an_off_semester_module_is_not_listed_at_all(self):
 		# Block 4 runs in the second semester, so a failed block 3 module cannot be
@@ -391,7 +475,7 @@ class TestRegistrationFlow(IntegrationTestCase):
 
 		# And it cannot be smuggled in by a stale or hand-built request.
 		with self.assertRaises(frappe.ValidationError):
-			reg.register_student(self.student, [failed])
+			reg.register_student(self.student, [failed], AGREED)
 
 	def test_a_blocker_is_named_even_when_it_is_not_on_the_page(self):
 		# ANH2403 needs ANH2303, a first-semester module. It stays blocked, and the
@@ -428,7 +512,7 @@ class TestRegistrationFlow(IntegrationTestCase):
 
 		mandatory = [c for c, r in rows.items() if r["status"] in reg.MANDATORY]
 		with self.assertRaises(frappe.ValidationError):
-			reg.register_student(self.student, mandatory + blocked[:1])
+			reg.register_student(self.student, mandatory + blocked[:1], AGREED)
 
 	def test_registering_twice_is_refused_and_the_record_is_shown(self):
 		result = self.options()
@@ -438,7 +522,7 @@ class TestRegistrationFlow(IntegrationTestCase):
 			for row in group["rows"]
 			if row["status"] in reg.MANDATORY
 		]
-		reg.register_student(self.student, mandatory)
+		reg.register_student(self.student, mandatory, AGREED)
 
 		# Once registered the page becomes a record, not another offer -- and the
 		# block calculation must not read the new enrolment as progress.
@@ -447,7 +531,7 @@ class TestRegistrationFlow(IntegrationTestCase):
 		self.assertEqual(len(after["modules"]), len(mandatory))
 
 		with self.assertRaises(frappe.ValidationError):
-			reg.register_student(self.student, mandatory)
+			reg.register_student(self.student, mandatory, AGREED)
 
 	def registered_provisionally(self):
 		"""Register with one prerequisite pending, and return the provisional set."""
@@ -461,7 +545,7 @@ class TestRegistrationFlow(IntegrationTestCase):
 		provisional = [c for c, r in rows.items() if r["status"] == reg.PROVISIONAL]
 		self.assertTrue(provisional, "expected a provisional module to test with")
 
-		reg.register_student(self.student, mandatory)
+		reg.register_student(self.student, mandatory, AGREED)
 		return provisional
 
 	def settle_supplementary(self, code):

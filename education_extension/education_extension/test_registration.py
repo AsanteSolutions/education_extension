@@ -411,16 +411,79 @@ class TestRegistrationFlow(IntegrationTestCase):
 		self.assertTrue(consent.consented_at)
 
 		# Snapshotted, not referenced: amending the wording afterwards must not
-		# rewrite what this student agreed to.
-		wording = reg.declarations()
+		# rewrite what this student agreed to. Compared against the filled version,
+		# which is what was put in front of them.
+		wording = reg.declarations(self.student)
 		self.assertEqual(consent.declaration_text, wording["prerequisites"])
 		self.assertEqual(consent.consent_text, wording["popia"])
 
-		frappe.db.set_single_value("Registration Settings", "popia_consent", "<p>Amended.</p>")
-		frappe.clear_cache()
-		self.assertNotEqual(
-			frappe.db.get_value("Registration Consent", name, "consent_text"), "<p>Amended.</p>"
+		# Restored by hand rather than left to the rollback. A Single is cached in
+		# redis, which outlives both the transaction and the process, and cleanups
+		# run LIFO so one registered here fires before the rollback -- either way
+		# the cache would be left holding the amended wording, and every later test
+		# and run would read that instead of the real text.
+		field = "popia_consent"
+		original = frappe.db.get_single_value("Registration Settings", field)
+		try:
+			frappe.db.set_single_value(
+				"Registration Settings", field, "<p>Amended.</p>"
+			)
+			frappe.clear_cache()
+			self.assertNotEqual(
+				frappe.db.get_value("Registration Consent", name, "consent_text"),
+				"<p>Amended.</p>",
+			)
+		finally:
+			frappe.db.set_single_value("Registration Settings", field, original)
+			frappe.clear_cache()
+
+	def test_the_declaration_names_the_student(self):
+		"""The paper form has the student write their name, number and the date into
+		the sentence. Filled in here, so the text reads as a completed document
+		rather than a form with blanks, and so the recorded consent says who agreed
+		to it inside the wording itself."""
+		wording = reg.declarations(self.student)
+		details = frappe.db.get_value(
+			"Student",
+			self.student,
+			["student_name", "custom_id_number", "custom_student_number"],
+			as_dict=True,
 		)
+
+		for text in wording.values():
+			self.assertIn(details.student_name, text)
+			self.assertIn(details.custom_id_number or details.custom_student_number, text)
+
+		# Nothing may reach a student with a placeholder still in it.
+		for token in ("{student_name}", "{id_number}", "{student_number}", "{date}"):
+			for key, text in wording.items():
+				self.assertNotIn(token, text, f"{token} unfilled in {key}")
+
+	def test_the_unfilled_wording_keeps_its_placeholders(self):
+		# Called without a student it is the template, which is what the settings
+		# form edits.
+		template = " ".join(reg.declarations().values())
+		self.assertIn("{student_name}", template)
+
+	def test_a_name_cannot_carry_markup_into_the_declaration(self):
+		# The wording is rendered as HTML, so a value substituted into it is escaped
+		# -- a student name is not a place to accept markup from.
+		filled = reg.fill_declaration(
+			"<p>I, {student_name}, declare.</p>", {"{student_name}": "<script>x</script>"}
+		)
+		self.assertNotIn("<script>", filled)
+
+	def test_the_consent_records_the_filled_wording(self):
+		reg.register_student(self.student, self.mandatory_modules(), AGREED)
+		name = frappe.db.get_value(
+			"Registration Consent",
+			{"student": self.student, "academic_term": self.term, "docstatus": 1},
+		)
+		consent = frappe.get_doc("Registration Consent", name)
+		student_name = frappe.db.get_value("Student", self.student, "student_name")
+		self.assertIn(student_name, consent.declaration_text)
+		self.assertIn(student_name, consent.consent_text)
+		self.assertNotIn("{student_name}", consent.consent_text)
 
 	def test_the_wording_reaches_the_page(self):
 		# The page renders what the server will record, so it comes down with the

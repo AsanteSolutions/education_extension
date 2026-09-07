@@ -137,13 +137,7 @@ class TestRegistrationRules(UnitTestCase):
 
 	def test_only_actionable_statuses_are_selectable(self):
 		self.assertEqual(reg.SELECTABLE, {reg.REQUIRED, reg.CARRIED_OVER, reg.PROVISIONAL})
-		for status in (
-			reg.BLOCKED,
-			reg.ALREADY_PASSED,
-			reg.AWAITING,
-			reg.REGISTERED,
-			reg.DEFERRED,
-		):
+		for status in (reg.BLOCKED, reg.ALREADY_PASSED, reg.AWAITING, reg.REGISTERED):
 			self.assertNotIn(status, reg.SELECTABLE)
 
 	def test_carry_overs_stay_in_their_own_semester(self):
@@ -387,24 +381,37 @@ class TestRegistrationFlow(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			reg.register_student(self.student, mandatory[:-1])
 
-	def test_an_off_semester_failure_is_shown_but_not_offered(self):
-		# Block 4 runs in the second semester. A failed block 3 module is a
-		# first-semester module, so it cannot be retaken now -- but it must still
-		# appear, since it is often what is blocking something else on the page.
+	def test_an_off_semester_module_is_not_listed_at_all(self):
+		# Block 4 runs in the second semester, so a failed block 3 module cannot be
+		# retaken now and has no business on the page.
+		failed = "ANH2303 - Veterinary Laboratory Diagnostics"
+		self.remark(failed, "F")
+
+		rows = {
+			row["course"]: row
+			for group in self.options()["groups"]
+			for row in group["rows"]
+		}
+		self.assertNotIn(failed, rows)
+
+		# And it cannot be smuggled in by a stale or hand-built request.
+		with self.assertRaises(frappe.ValidationError):
+			reg.register_student(self.student, [failed])
+
+	def test_a_blocker_from_the_other_semester_says_so(self):
+		# ANH2403 needs ANH2303, a first-semester module. Blocked, and since the
+		# blocker is not on the page the reason has to explain why it will not
+		# clear this term.
 		self.remark("ANH2303 - Veterinary Laboratory Diagnostics", "F")
 		rows = {
 			row["course"]: row
 			for group in self.options()["groups"]
 			for row in group["rows"]
 		}
-		deferred = rows.get("ANH2303 - Veterinary Laboratory Diagnostics")
-		self.assertIsNotNone(deferred, "an off-semester failure must still be listed")
-		self.assertEqual(deferred["status"], reg.DEFERRED)
-		self.assertFalse(deferred["selectable"])
-		self.assertIn("first", deferred["reason"])
-
-		with self.assertRaises(frappe.ValidationError):
-			reg.register_student(self.student, [deferred["course"]])
+		blocked = rows["ANH2403 - Veterinary Epidemiology"]
+		self.assertEqual(blocked["status"], reg.BLOCKED)
+		self.assertIn("ANH2303", blocked["blocked_by"])
+		self.assertIn("first semester", blocked["reason"])
 
 	def test_nothing_offered_comes_from_the_other_semester(self):
 		block = self.options()["block"]

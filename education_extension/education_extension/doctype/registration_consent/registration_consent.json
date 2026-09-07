@@ -18,6 +18,11 @@
   "declarations_section",
   "prerequisites_declared",
   "popia_consented",
+  "signatures_section",
+  "student_signature",
+  "signed_by_guardian",
+  "guardian_name",
+  "guardian_signature",
   "text_section",
   "declaration_text",
   "consent_text"
@@ -105,6 +110,39 @@
    "fieldname": "popia_consented",
    "fieldtype": "Check",
    "label": "POPIA Consent Given",
+   "read_only": 1
+  },
+  {
+   "fieldname": "signatures_section",
+   "fieldtype": "Section Break",
+   "label": "Signatures"
+  },
+  {
+   "fieldname": "student_signature",
+   "fieldtype": "Signature",
+   "label": "Student Signature",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "A parent or guardian has to sign as well where the student is a minor.",
+   "fieldname": "signed_by_guardian",
+   "fieldtype": "Check",
+   "label": "Signed by a Parent or Guardian",
+   "read_only": 1
+  },
+  {
+   "depends_on": "signed_by_guardian",
+   "fieldname": "guardian_name",
+   "fieldtype": "Data",
+   "label": "Parent or Guardian Name",
+   "read_only": 1
+  },
+  {
+   "depends_on": "signed_by_guardian",
+   "fieldname": "guardian_signature",
+   "fieldtype": "Signature",
+   "label": "Parent or Guardian Signature",
    "read_only": 1
   },
   {

@@ -190,6 +190,44 @@
 						</div>
 					</div>
 
+					<div class="mb-5 rounded border">
+						<div class="border-b bg-gray-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+							Signature
+						</div>
+						<div class="px-4 py-3">
+							<SignaturePad
+								v-model="signatures.student"
+								:placeholder="studentName ? `Sign as ${studentName}` : 'Sign here'"
+							/>
+
+							<!-- Offered rather than deduced. The form requires a parent or
+							     guardian to sign for a minor, and nothing here can reliably
+							     tell who is one: date of birth is recorded for almost nobody. -->
+							<div class="mt-4 border-t pt-3">
+								<Checkbox
+									v-model="withGuardian"
+									label="A parent or guardian is signing as well"
+								/>
+								<p class="mt-1 text-xs text-gray-500">
+									Required if you are under 18.
+								</p>
+							</div>
+
+							<div v-if="withGuardian" class="mt-3">
+								<FormControl
+									v-model="signatures.guardian_name"
+									label="Parent or guardian name"
+									class="mb-3"
+								/>
+								<SignaturePad
+									v-model="signatures.guardian"
+									placeholder="Parent or guardian signs here"
+									hint="To be signed by the parent or guardian, not the student"
+								/>
+							</div>
+						</div>
+					</div>
+
 					<ErrorMessage class="mb-3" :message="submission.error" />
 
 					<div class="flex items-center justify-between gap-4 border-t pt-4">
@@ -200,7 +238,7 @@
 							</span>
 							<Button
 								variant="solid"
-								:disabled="!bothAgreed"
+								:disabled="!readyToRegister"
 								:loading="submission.loading"
 								@click="submit"
 							>
@@ -222,10 +260,13 @@ import {
 	Checkbox,
 	ErrorMessage,
 	FeatherIcon,
+	FormControl,
 	createResource,
 } from 'frappe-ui'
 import { computed, reactive, ref, watch } from 'vue'
 import MissingData from '@/components/MissingData.vue'
+import SignaturePad from '@/components/SignaturePad.vue'
+import { studentStore } from '@/stores/student'
 
 // The endpoint is session-scoped, so the page never names a student. Everything
 // on screen comes from this one response, including the declaration wording —
@@ -247,6 +288,38 @@ const chosen = reactive(new Set())
 
 const agreed = reactive({ prerequisites: false, popia: false })
 const bothAgreed = computed(() => agreed.prerequisites && agreed.popia)
+
+// Drawn marks, as PNG data URIs. The student's is required; a guardian's is
+// offered because the form requires one for a minor, and nothing here can tell
+// who is one — date of birth is recorded for two students out of 189.
+const signatures = reactive({ student: '', guardian_name: '', guardian: '' })
+const withGuardian = ref(false)
+
+const { getStudentInfo } = studentStore()
+const studentInfo = getStudentInfo()
+const studentName = computed(() => studentInfo.value?.student_name || '')
+
+const guardianComplete = computed(
+	() => !!signatures.guardian_name.trim() && !!signatures.guardian,
+)
+
+// Half a countersignature is worse than none: a name with no mark is not signed,
+// and a mark with no name cannot be attributed to anybody. The server refuses
+// either half, so the button does too rather than letting it fail on submit.
+const readyToRegister = computed(
+	() =>
+		bothAgreed.value &&
+		!!signatures.student &&
+		(!withGuardian.value || guardianComplete.value),
+)
+
+// Unticking discards what was drawn, so an abandoned half-filled guardian block
+// cannot be submitted by accident.
+watch(withGuardian, (wanted) => {
+	if (wanted) return
+	signatures.guardian_name = ''
+	signatures.guardian = ''
+})
 
 // Mandatory rows are the ones the student cannot opt out of: their own semester,
 // including any module offered provisionally.
@@ -317,10 +390,16 @@ const submit = () =>
 		// Sent as what the student actually ticked rather than a single flag: the
 		// server records the two declarations separately, as the paper form does.
 		declarations: { prerequisites: agreed.prerequisites, popia: agreed.popia },
+		signatures: {
+			student: signatures.student,
+			guardian_name: withGuardian.value ? signatures.guardian_name : '',
+			guardian: withGuardian.value ? signatures.guardian : '',
+		},
 	})
 
-// A reload after registering returns a different state, and neither the
-// selection nor the agreements built for the previous one still mean anything.
+// A reload after registering returns a different state, and nothing built for
+// the previous one still means anything — least of all a signature, which must
+// never be carried into a registration it was not drawn for.
 watch(
 	() => data.value?.state,
 	(state) => {
@@ -328,6 +407,10 @@ watch(
 		chosen.clear()
 		agreed.prerequisites = false
 		agreed.popia = false
+		withGuardian.value = false
+		signatures.student = ''
+		signatures.guardian_name = ''
+		signatures.guardian = ''
 	},
 )
 </script>

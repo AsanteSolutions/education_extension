@@ -568,11 +568,13 @@ MANDATORY = frozenset({REQUIRED, PROVISIONAL})
 
 
 @frappe.whitelist()
-def register(courses, declarations=None):
+def register(courses, declarations=None, signatures=None):
 	"""Register the logged-in student. Final on submission — there is no draft.
 
 	`declarations` carries the two agreements from the consent step, as
-	{"prerequisites": true, "popia": true}. Both are required.
+	{"prerequisites": true, "popia": true}; both are required. `signatures`
+	carries the drawn marks, as {"student": <data URI>, "guardian_name": str,
+	"guardian": <data URI>}; the student's is required and the guardian's is not.
 	"""
 	from education_extension.education_extension.api import _current_user_student
 
@@ -584,11 +586,15 @@ def register(courses, declarations=None):
 		courses = frappe.parse_json(courses)
 	if isinstance(declarations, str):
 		declarations = frappe.parse_json(declarations)
+	if isinstance(signatures, str):
+		signatures = frappe.parse_json(signatures)
 
-	return register_student(student, list(courses or ()), declarations or {})
+	return register_student(
+		student, list(courses or ()), declarations or {}, signatures or {}
+	)
 
 
-def register_student(student, courses, agreed=None):
+def register_student(student, courses, agreed=None, signatures=None):
 	"""Create and submit the enrolments for `courses`, returning what was made.
 
 	Eligibility is recomputed here rather than trusted from the request. The page
@@ -643,7 +649,7 @@ def register_student(student, courses, agreed=None):
 	# Recorded before anything is enrolled, so a registration cannot exist
 	# without the consent that permitted it. Both are in the one transaction, so
 	# a failure at either end leaves neither.
-	consent = _record_consent(student, options["period"], agreed or {})
+	consent = _record_consent(student, options["period"], agreed or {}, signatures or {})
 
 	created = [
 		_create_enrollment(student, program, grouped[program], rows, options["period"])
@@ -653,7 +659,7 @@ def register_student(student, courses, agreed=None):
 	return {"enrollments": created, "courses": chosen, "consent": consent}
 
 
-def _record_consent(student, period, agreed):
+def _record_consent(student, period, agreed, signatures):
 	"""Store what the student agreed to, and refuse to proceed without it."""
 	if not agreed.get("prerequisites"):
 		frappe.throw(_("You must declare that you meet the pre-requisites of these modules."))
@@ -661,6 +667,8 @@ def _record_consent(student, period, agreed):
 		frappe.throw(_("You must consent to your personal information being processed."))
 
 	wording = declarations(student)
+	guardian_name = (signatures.get("guardian_name") or "").strip()
+	guardian_signature = (signatures.get("guardian") or "").strip()
 
 	consent = frappe.new_doc("Registration Consent")
 	consent.update(
@@ -672,6 +680,13 @@ def _record_consent(student, period, agreed):
 			"ip_address": frappe.local.request_ip,
 			"prerequisites_declared": 1,
 			"popia_consented": 1,
+			"student_signature": (signatures.get("student") or "").strip(),
+			# Taken from whether a guardian actually signed rather than from a
+			# separate claim that one did, so the flag cannot disagree with the
+			# record it describes.
+			"signed_by_guardian": 1 if (guardian_name or guardian_signature) else 0,
+			"guardian_name": guardian_name,
+			"guardian_signature": guardian_signature,
 			# Snapshotted, not referenced: the institution can amend the wording,
 			# and this record has to keep saying what this student was shown.
 			"declaration_text": wording["prerequisites"],

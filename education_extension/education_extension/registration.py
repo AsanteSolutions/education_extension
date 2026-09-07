@@ -136,11 +136,6 @@ def carry_over_blocks(block):
 	return list(range(block - 2, 0, -2))
 
 
-def semester_word(block):
-	"""Which semester of the year a block runs in, for a reason line."""
-	return _("first") if block % 2 else _("second")
-
-
 def courses_by_block(blocks=None):
 	"""block -> its modules, in code order."""
 	grouped = {}
@@ -345,8 +340,7 @@ def options_for(student, on=None):
 
 	history = academic_history(student)
 	rules = prerequisite_rules()
-	blocks = curriculum_blocks()
-	curriculum = courses_by_block(blocks)
+	curriculum = courses_by_block()
 	already = registered_courses(student, period.academic_year, period.academic_term)
 
 	# This block, plus anything behind it the student has not passed. Whether a
@@ -371,7 +365,7 @@ def options_for(student, on=None):
 	alongside = {c for c in candidates if history.get(c, NEVER) != PASSED}
 
 	rows = [
-		_row(course, course_block, block, history, already, rules, alongside, strict, blocks)
+		_row(course, course_block, block, history, already, rules, alongside, strict)
 		for course, course_block in candidates.items()
 	]
 	rows.sort(key=lambda row: (row["block"], row["course"]))
@@ -387,7 +381,7 @@ def options_for(student, on=None):
 	}
 
 
-def _row(course, course_block, block, history, already, rules, alongside, strict=False, blocks=None):
+def _row(course, course_block, block, history, already, rules, alongside, strict=False):
 	blocking, outstanding, unverified = unmet_prerequisites(
 		course, history, alongside, rules, strict
 	)
@@ -402,21 +396,6 @@ def _row(course, course_block, block, history, already, rules, alongside, strict
 	elif blocking:
 		status = BLOCKED
 		reason = _("Not yet passed: {0}.").format(", ".join(_codes(blocking)))
-		# The blocker itself is not on this page when it belongs to the other
-		# semester, so the reason has to carry that: otherwise the student is told
-		# a module is blocked by something they cannot see and cannot act on this
-		# term, and reads it as a mistake.
-		elsewhere = sorted(
-			{
-				(blocks or {}).get(other)
-				for other in blocking
-				if (blocks or {}).get(other) and (blocks or {})[other] % 2 != block % 2
-			}
-		)
-		if elsewhere:
-			reason += " " + _("Only offered in the {0} semester.").format(
-				semester_word(elsewhere[0])
-			)
 	elif outstanding:
 		status = PROVISIONAL
 		reason = _("Provisional: {0} has no final result yet.").format(", ".join(_codes(outstanding)))

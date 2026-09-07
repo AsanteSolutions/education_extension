@@ -157,11 +157,6 @@ class TestRegistrationRules(UnitTestCase):
 					earlier % 2, block % 2, f"block {earlier} cannot run alongside {block}"
 				)
 
-	def test_a_semester_is_named_for_the_reason_line(self):
-		self.assertEqual(reg.semester_word(1), "first")
-		self.assertEqual(reg.semester_word(3), "first")
-		self.assertEqual(reg.semester_word(4), "second")
-
 	def test_a_students_own_semester_is_not_optional(self):
 		# Carry-overs are the only thing a student may decline.
 		self.assertEqual(reg.MANDATORY, {reg.REQUIRED, reg.PROVISIONAL})
@@ -398,10 +393,9 @@ class TestRegistrationFlow(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			reg.register_student(self.student, [failed])
 
-	def test_a_blocker_from_the_other_semester_says_so(self):
-		# ANH2403 needs ANH2303, a first-semester module. Blocked, and since the
-		# blocker is not on the page the reason has to explain why it will not
-		# clear this term.
+	def test_a_blocker_is_named_even_when_it_is_not_on_the_page(self):
+		# ANH2403 needs ANH2303, a first-semester module. It stays blocked, and the
+		# reason names the module plainly whether or not it is listed.
 		self.remark("ANH2303 - Veterinary Laboratory Diagnostics", "F")
 		rows = {
 			row["course"]: row
@@ -411,7 +405,7 @@ class TestRegistrationFlow(IntegrationTestCase):
 		blocked = rows["ANH2403 - Veterinary Epidemiology"]
 		self.assertEqual(blocked["status"], reg.BLOCKED)
 		self.assertIn("ANH2303", blocked["blocked_by"])
-		self.assertIn("first semester", blocked["reason"])
+		self.assertEqual(blocked["reason"], "Not yet passed: ANH2303.")
 
 	def test_nothing_offered_comes_from_the_other_semester(self):
 		block = self.options()["block"]

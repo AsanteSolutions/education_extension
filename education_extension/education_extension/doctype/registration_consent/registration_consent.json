@@ -1,0 +1,174 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "EDU-EXT-CONSENT-.YYYY.-.#####",
+ "creation": "2026-09-07 09:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "student",
+  "student_name",
+  "academic_year",
+  "academic_term",
+  "column_break_when",
+  "consented_at",
+  "ip_address",
+  "amended_from",
+  "declarations_section",
+  "prerequisites_declared",
+  "popia_consented",
+  "text_section",
+  "declaration_text",
+  "consent_text"
+ ],
+ "fields": [
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Student",
+   "options": "Student",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fetch_from": "student.student_name",
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Student Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "academic_year",
+   "fieldtype": "Link",
+   "label": "Academic Year",
+   "options": "Academic Year",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "academic_term",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Academic Term",
+   "options": "Academic Term",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_when",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "consented_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Consented At",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "description": "Where the consent was given from, kept as part of the record.",
+   "fieldname": "ip_address",
+   "fieldtype": "Data",
+   "label": "IP Address",
+   "read_only": 1
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Registration Consent",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "declarations_section",
+   "fieldtype": "Section Break",
+   "label": "Declarations"
+  },
+  {
+   "default": "0",
+   "description": "That they have met the pre-requisites of the modules registered, that the information is correct, and that the quality assurance office may verify it.",
+   "fieldname": "prerequisites_declared",
+   "fieldtype": "Check",
+   "label": "Pre-requisites Declared",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Consent to the collection, storage and processing of personal information under POPIA.",
+   "fieldname": "popia_consented",
+   "fieldtype": "Check",
+   "label": "POPIA Consent Given",
+   "read_only": 1
+  },
+  {
+   "fieldname": "text_section",
+   "fieldtype": "Section Break",
+   "label": "What Was Agreed To"
+  },
+  {
+   "description": "Recorded as it was shown at the time. Later amendments to the wording do not rewrite what this student agreed to.",
+   "fieldname": "declaration_text",
+   "fieldtype": "Text Editor",
+   "label": "Declaration Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "consent_text",
+   "fieldtype": "Text Editor",
+   "label": "POPIA Consent Text",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-09-07 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Education Extension",
+ "name": "Registration Consent",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Education Manager",
+   "share": 1
+  },
+  {
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Academics User"
+  },
+  {
+   "print": 1,
+   "read": 1,
+   "role": "Student"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -117,8 +117,11 @@
 									<div v-if="row.reason" class="mt-0.5 text-xs text-gray-600">
 										{{ row.reason }}
 									</div>
-									<!-- Said plainly, because it explains why a module is offered
-									     despite a prerequisite that cannot be confirmed. -->
+									<!-- Only when the institute has turned it on for debugging. It
+									     explains why a module is offered despite a prerequisite
+									     that cannot be confirmed, which helps whoever is diagnosing
+									     the rules and not the student, who cannot act on it. The
+									     server sends an empty list when it is off. -->
 									<div v-if="row.unverified.length" class="mt-0.5 text-xs text-gray-500">
 										No result on record for {{ row.unverified.join(', ') }}.
 									</div>

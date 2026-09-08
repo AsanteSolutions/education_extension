@@ -253,17 +253,6 @@ class TestRegistrationFlow(IntegrationTestCase):
 				where other.student = pe.student and other.docstatus = 1
 				  and other.academic_term = %(term)s
 			  )
-			  -- Registering is impossible for a student whose student_email_id is
-			  -- not a User: this site's LMS script links an LMS Program Member by
-			  -- that field, the link fails validation, and the enrolment insert
-			  -- aborts with it. 22 of 189 students are in that state, so a bare
-			  -- query lands on one sooner or later and the failure looks like a
-			  -- registration bug rather than the data problem it is.
-			  and exists (
-				select 1 from tabStudent s
-				join tabUser u on u.name = s.student_email_id
-				where s.name = pe.student
-			  )
 			order by pe.student
 			limit 1
 			""",
@@ -273,20 +262,11 @@ class TestRegistrationFlow(IntegrationTestCase):
 			self.skipTest("no unregistered Semester 3 student to progress")
 		self.student = candidates[0][0]
 
-		# This site has a Server Script on Program Enrollment that pushes the
-		# student into an LMS Program on before_insert, and the LMS Program refuses
-		# a member it already has -- so a second registration for the same
-		# programme aborts. Worse, that write escapes the rollback: the first test
-		# to register would otherwise leave the membership behind and every later
-		# one in the run would fail on it. Cleared at the start of each test, which
-		# is order-independent, unlike a cleanup.
-		# Keyed on student_email_id, which is what the script links the member by --
-		# not on `user`, which is a different field and happens to hold the same
-		# value for most but not all students here.
-		for field in ("student_email_id", "user"):
-			member = frappe.db.get_value("Student", self.student, field)
-			if member:
-				frappe.db.delete("LMS Program Member", {"member": member})
+		# No LMS fixture work is needed any more. The mirroring used to run inline
+		# on before_insert, which meant it could refuse a registration outright and
+		# its writes escaped the rollback, so every test that registered poisoned
+		# the ones after it. It is a queued job now, and `enqueue_after_commit`
+		# means a rolled-back test never enqueues anything at all.
 
 		frappe.db.delete("Registration Period", {"academic_term": self.term})
 		self.period = frappe.get_doc(
@@ -453,32 +433,44 @@ class TestRegistrationFlow(IntegrationTestCase):
 			session.user = before["user"]
 			frappe.local.form_dict = before["form_dict"]
 
-	def test_the_elevation_restores_everything_it_touches(self):
-		session = frappe.local.session
-		# Restored in a finally: a test that leaves the session pointing at a user
-		# who does not exist takes every test after it down with it, which is
-		# exactly what happened when this was first written.
-		was = (session.user, session.sid, session.data)
+	def test_nothing_registers_as_anyone_but_the_student(self):
+		"""Registration runs entirely as the student, with no elevation anywhere.
+
+		It used to have to elevate, because inserting an enrolment fired LMS Server
+		Scripts on before_insert that the student had no rights for — and
+		`LMS Enrollment.validate` refuses a member without an LMS role, which no
+		permission flag can skip. Those are queued jobs now, running as their own
+		service user, so nothing on this path is privileged.
+
+		Ownership is the observable proof: under elevation these came out owned by
+		Administrator and the enrolment's owner had to be written back afterwards.
+		"""
+		user = frappe.db.get_value("Student", self.student, "user")
+		if not user:
+			self.skipTest("student has no portal user")
+
+		frappe.set_user(user)
 		try:
-			session.user = "someone@example.com"
-			session.sid = "sid-to-keep"
-			session.data = frappe._dict(marker="kept")
-
-			with reg.as_administrator():
-				self.assertEqual(frappe.session.user, "Administrator")
-
-			self.assertEqual(frappe.session.user, "someone@example.com")
-			self.assertEqual(frappe.session.sid, "sid-to-keep")
-			self.assertEqual(frappe.session.data.marker, "kept")
-
-			# And it puts things back even when the block raises.
-			with self.assertRaises(ValueError):
-				with reg.as_administrator():
-					raise ValueError("boom")
-			self.assertEqual(frappe.session.user, "someone@example.com")
-			self.assertEqual(frappe.session.sid, "sid-to-keep")
+			created = reg.register(
+				json.dumps(self.mandatory_modules()), json.dumps(AGREED), json.dumps(SIGNED)
+			)
 		finally:
-			session.user, session.sid, session.data = was
+			frappe.set_user("Administrator")
+
+		enrollment = created["enrollments"][0]
+		self.assertEqual(frappe.db.get_value("Program Enrollment", enrollment, "owner"), user)
+
+		owners = frappe.get_all(
+			"Course Enrollment",
+			filters={"program_enrollment": enrollment},
+			pluck="owner",
+		)
+		self.assertTrue(owners)
+		self.assertEqual(set(owners), {user}, "course enrolments should be the student's own")
+
+		self.assertEqual(
+			frappe.db.get_value("Registration Consent", created["consent"], "owner"), user
+		)
 
 	def test_a_signature_is_required(self):
 		# Ticking a box is agreement; the form asks for a mark as well.

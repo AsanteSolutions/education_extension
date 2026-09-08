@@ -13,8 +13,6 @@ code is what QA signed off, and reading it keeps registration independent of how
 marks happen to be calculated.
 """
 
-from contextlib import contextmanager
-
 import frappe
 from frappe import _
 from frappe.utils import escape_html, formatdate, getdate, now, nowdate
@@ -701,37 +699,6 @@ def _record_consent(student, period, agreed, signatures):
 	return consent.name
 
 
-@contextmanager
-def as_administrator():
-	"""Run a block as Administrator and put the session back exactly as it was.
-
-	`frappe.set_user` is not safe to call bare inside a request. Besides the user
-	it overwrites `session.sid` with the username, blanks `session.data` and
-	empties `form_dict` — so switching back by user alone leaves the session
-	unrecognisable, and the student is logged out on their next request. It is
-	harmless in a console or a background job, which is exactly where this was
-	first tested and why it looked fine.
-
-	Everything `set_user` clears and this code depends on is captured and put
-	back. Caches it drops (`role_permissions`, `user_perms`) are left to rebuild
-	themselves, which they do on next access.
-	"""
-	session = frappe.local.session
-	was_user = session.user
-	was_sid = session.sid
-	was_data = session.data
-	was_form_dict = frappe.local.form_dict
-
-	frappe.set_user("Administrator")
-	try:
-		yield
-	finally:
-		frappe.set_user(was_user)
-		session.sid = was_sid
-		session.data = was_data
-		frappe.local.form_dict = was_form_dict
-
-
 def _create_enrollment(student, program, courses, rows, period):
 	duplicate = frappe.db.exists(
 		"Program Enrollment",
@@ -765,34 +732,50 @@ def _create_enrollment(student, program, courses, rows, period):
 		)
 
 	# Registration is a privileged action taken on the student behalf: the gate is
-	# the eligibility check above, not the role. Granting it needs more than a
-	# flag, because writing this one document sets off three others.
+	# the eligibility check above, not the role. `Document.has_permission` consults
+	# only the flag on the document itself -- `frappe.flags.ignore_permissions` is
+	# read nowhere in the document write path -- so it goes on the document.
 	#
-	# `Document.has_permission` consults only the flag on the document itself --
-	# `frappe.flags.ignore_permissions` is read nowhere in the document write path
-	# -- and the documents that follow are ones we never touch. Inserting fires
-	# this site's LMS integration script, which saves an LMS Program. Submitting
-	# runs the education app's `create_course_enrollments`, and each Course
-	# Enrollment fires a second LMS script. A student has permission on none of
-	# them, so the write runs elevated.
-	user = frappe.session.user
+	# Nothing here runs as anyone but the student. It used to have to, because
+	# inserting an enrolment fired LMS Server Scripts the student had no rights
+	# for; those are queued jobs now and run as their own service user.
 	enrollment.flags.ignore_permissions = True
+	enrollment.insert()
 
-	with as_administrator():
-		enrollment.insert()
-		enrollment.submit()
-
-	# Restored afterwards rather than set beforehand: Frappe stamps `owner` from
-	# the session user on every new document and overwrites whatever was there.
-	# Worth the extra write, because owner is how a registrar tells a student who
-	# registered themselves from an enrolment a staff member keyed in -- and with
-	# no approval step, that is the only place the difference is recorded.
-	if user != "Administrator":
-		frappe.db.set_value(
-			"Program Enrollment", enrollment.name, "owner", user, update_modified=False
-		)
+	_create_course_enrollments(enrollment)
+	enrollment.submit()
 
 	return enrollment.name
+
+
+def _create_course_enrollments(enrollment):
+	"""Create the Course Enrollment rows before the enrolment is submitted.
+
+	Submitting runs the education app's own `create_course_enrollments`, which
+	builds each one with an unflagged `frappe.get_doc(...).save()` -- a document we
+	never touch and so cannot grant permission on. That single call was the last
+	thing forcing this whole write to run elevated.
+
+	It is guarded by `db.exists`, though, so creating the rows here first means its
+	loop finds them and never reaches that save. Same records, made deliberately
+	and owned by the student who registered.
+
+	If the education app ever drops that guard this does not corrupt anything:
+	`CourseEnrollment.validate_duplication` throws, so the failure is loud at
+	registration rather than silent.
+	"""
+	for row in enrollment.courses:
+		course_enrollment = frappe.get_doc(
+			{
+				"doctype": "Course Enrollment",
+				"student": enrollment.student,
+				"course": row.course,
+				"program_enrollment": enrollment.name,
+				"enrollment_date": enrollment.enrollment_date,
+			}
+		)
+		course_enrollment.flags.ignore_permissions = True
+		course_enrollment.insert()
 
 
 # ---------------------------------------------------------------------------

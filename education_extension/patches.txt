@@ -8,3 +8,4 @@ education_extension.patches.convert_remark_codes
 education_extension.patches.seed_course_prerequisites
 education_extension.patches.seed_registration_declarations
 education_extension.patches.move_lms_sync_into_the_app
+education_extension.patches.seed_registrar_name

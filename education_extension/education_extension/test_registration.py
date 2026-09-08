@@ -509,6 +509,61 @@ class TestRegistrationFlow(IntegrationTestCase):
 			frappe.db.set_single_value("Registration Settings", field, original)
 			frappe.clear_cache()
 
+	def test_the_proof_of_registration_reads_off_the_consent(self):
+		"""The proof prints from the consent, not from an enrolment.
+
+		A registration can span two Program Enrollments when a module is carried
+		over, so no single enrolment is the registration — but there is exactly one
+		consent per student per term, and it holds the signature the document asks
+		the student to append.
+		"""
+		# Captured before registering: afterwards the page is a record of what was
+		# taken, not an offer, so there are no groups to read.
+		registered_for = self.mandatory_modules()
+		result = reg.register_student(
+			self.student,
+			registered_for,
+			AGREED,
+			dict(SIGNED, guardian_name="A Parent", guardian=SIGNED["student"]),
+		)
+		consent = frappe.get_doc("Registration Consent", result["consent"])
+		proof = consent.proof_of_registration()
+
+		student = frappe.db.get_value(
+			"Student", self.student, ["custom_id_number", "custom_student_number"], as_dict=True
+		)
+		self.assertEqual(proof.id_number, student.custom_id_number)
+		self.assertEqual(proof.student_number, student.custom_student_number)
+		self.assertTrue(proof.full_names)
+		self.assertEqual(proof.qualification, "DIPLOMA IN ANIMAL HEALTH")
+		self.assertIn("2026", proof.period)
+		self.assertTrue(proof.registrar, "the registrar should be named on the document")
+
+		# Exactly what was registered, read from the enrolments rather than stored,
+		# so a module removed later stops appearing.
+		self.assertEqual(
+			{module["code"] for module in proof.modules},
+			{course.split(" - ")[0] for course in registered_for},
+		)
+
+		rendered = frappe.get_print(
+			"Registration Consent", consent.name, print_format="Proof of Registration"
+		)
+		self.assertIn("PROOF OF REGISTRATION", rendered)
+		self.assertIn(proof.student_number, rendered)
+		# Both marks, printed on the lines the paper form left blank.
+		self.assertEqual(rendered.count("data:image/png;base64"), 2)
+
+	def test_the_proof_shows_no_modules_once_they_are_all_removed(self):
+		result = reg.register_student(self.student, self.mandatory_modules(), AGREED, SIGNED)
+		consent = frappe.get_doc("Registration Consent", result["consent"])
+		self.assertTrue(consent.proof_of_registration().modules)
+
+		for name in result["enrollments"]:
+			frappe.db.set_value("Program Enrollment", name, "docstatus", 2)
+
+		self.assertEqual(consent.proof_of_registration().modules, [])
+
 	def test_a_signature_is_required(self):
 		# Ticking a box is agreement; the form asks for a mark as well.
 		with self.assertRaises(frappe.ValidationError):

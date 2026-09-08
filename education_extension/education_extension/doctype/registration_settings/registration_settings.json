@@ -14,6 +14,8 @@
   "consent_section",
   "prerequisite_declaration",
   "popia_consent",
+  "proof_section",
+  "registrar_name",
   "debugging_section",
   "show_unverified_prerequisites"
  ],
@@ -69,6 +71,18 @@
    "fieldname": "popia_consent",
    "fieldtype": "Text Editor",
    "label": "POPIA Consent"
+  },
+  {
+   "fieldname": "proof_section",
+   "fieldtype": "Section Break",
+   "label": "Proof of Registration"
+  },
+  {
+   "default": "MS N. MOYO",
+   "description": "Printed under the second signature line on the Proof of Registration.",
+   "fieldname": "registrar_name",
+   "fieldtype": "Data",
+   "label": "Registrar Name"
   },
   {
    "fieldname": "debugging_section",

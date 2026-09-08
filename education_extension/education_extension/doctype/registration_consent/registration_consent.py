@@ -17,6 +17,7 @@ import re
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.utils import formatdate, getdate
 
 # A drawn signature arrives as a PNG data URI from the canvas the student signs
 # on. Anything else is not a signature, and the cap is there because the field is
@@ -78,6 +79,123 @@ class RegistrationConsent(Document):
 			frappe.throw(_("The declaration wording was not recorded."))
 		if not (self.consent_text or "").strip():
 			frappe.throw(_("The POPIA consent wording was not recorded."))
+
+
+	def proof_of_registration(self):
+		"""Everything the Proof of Registration prints.
+
+		Assembled here rather than in the template so the print format stays
+		declarative, and so it can be checked without rendering anything.
+
+		The consent is the right thing to print from: there is one per student per
+		term, where a registration can span two Program Enrollments when a module is
+		being carried over — and it already holds the signature the document asks
+		the student to append.
+		"""
+		student = frappe.db.get_value(
+			"Student",
+			self.student,
+			[
+				"student_name",
+				"first_name",
+				"middle_name",
+				"last_name",
+				"custom_id_number",
+				"custom_student_number",
+				"custom_savc_registration_number",
+			],
+			as_dict=True,
+		) or frappe._dict()
+
+		modules, programs = self.registered_modules()
+
+		return frappe._dict(
+			{
+				"registration_date": formatdate(self.consented_at, "yyyy MMMM d"),
+				# Surname first, as the paper document has it.
+				"full_names": _surname_first(student),
+				"id_number": student.custom_id_number or "",
+				"student_number": student.custom_student_number or self.student,
+				"savc_number": student.custom_savc_registration_number or "",
+				"qualification": _qualification(programs),
+				"period": _term_period(self.academic_term),
+				"modules": modules,
+				"registrar": frappe.db.get_single_value(
+					"Registration Settings", "registrar_name"
+				)
+				or "",
+			}
+		)
+
+	def registered_modules(self):
+		"""(modules, programmes) for this student and term.
+
+		Read from the enrolments rather than from anything stored here: a module
+		removed afterwards, because a supplementary came back a fail, should not go
+		on printing as though the student were still registered for it.
+		"""
+		enrollments = frappe.get_all(
+			"Program Enrollment",
+			filters={
+				"student": self.student,
+				"academic_year": self.academic_year,
+				"academic_term": self.academic_term,
+				"docstatus": 1,
+			},
+			fields=["name", "program"],
+		)
+		if not enrollments:
+			return [], []
+
+		courses = frappe.get_all(
+			"Program Enrollment Course",
+			filters={
+				"parent": ["in", [e.name for e in enrollments]],
+				"parenttype": "Program Enrollment",
+			},
+			pluck="course",
+		)
+
+		modules = []
+		for course in sorted(set(courses)):
+			code, _, title = course.partition(" - ")
+			modules.append({"code": code, "name": title or course})
+
+		return modules, sorted({e.program for e in enrollments})
+
+
+def _surname_first(student):
+	"""`Doe Jane`, the way the paper document names a student."""
+	parts = [student.get("last_name"), student.get("first_name"), student.get("middle_name")]
+	ordered = " ".join(part for part in parts if part)
+	return ordered or (student.get("student_name") or "")
+
+
+def _qualification(programs):
+	"""The award, from the per-semester programmes that make it up.
+
+	The programmes are named "... Semester N"; the qualification is what is left
+	once that is taken off, which is what belongs on a proof of registration.
+	"""
+	if not programs:
+		return ""
+	return re.sub(r"\s*Semester\s*\d+\s*$", "", programs[0]).upper()
+
+
+def _term_period(academic_term):
+	"""`July to December 2026`, from the term's own dates."""
+	term = frappe.db.get_value(
+		"Academic Term", academic_term, ["term_start_date", "term_end_date"], as_dict=True
+	)
+	if not (term and term.term_start_date and term.term_end_date):
+		return academic_term or ""
+
+	start, end = getdate(term.term_start_date), getdate(term.term_end_date)
+	if start.year == end.year:
+		return "{0} to {1} {2}".format(start.strftime("%B"), end.strftime("%B"), end.year)
+	return "{0} {1} to {2} {3}".format(
+		start.strftime("%B"), start.year, end.strftime("%B"), end.year
+	)
 
 
 def validate_signature(value, label):

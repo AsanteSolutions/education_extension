@@ -554,6 +554,26 @@ class TestRegistrationFlow(IntegrationTestCase):
 		# Both marks, printed on the lines the paper form left blank.
 		self.assertEqual(rendered.count("data:image/png;base64"), 2)
 
+		# Rendered with no arguments, which is how the print view calls it. A custom
+		# format has to emit the letterhead itself and carries its own stylesheet;
+		# both were silently missing while the format still rendered.
+		letterhead = frappe.db.get_value("Letter Head", {"is_default": 1}, "content") or ""
+		if "img" in letterhead:
+			self.assertIn("letter-head", rendered.lower())
+			self.assertIn("/files/", rendered, "the letterhead image should be in the output")
+		self.assertIn("#1a7a3c", rendered, "the format stylesheet should reach the output")
+
+	def test_the_print_format_carries_no_css_variables(self):
+		"""wkhtmltopdf renders the PDF, and its WebKit predates custom properties.
+
+		A `var()` looks right in the browser preview and comes out unstyled in the
+		PDF anyone actually receives, which is close to the worst way for a styling
+		bug to behave.
+		"""
+		css = frappe.db.get_value("Print Format", "Proof of Registration", "css") or ""
+		self.assertTrue(css.strip(), "the format should carry a stylesheet")
+		self.assertNotIn("var(--", css)
+
 	def test_the_proof_shows_no_modules_once_they_are_all_removed(self):
 		result = reg.register_student(self.student, self.mandatory_modules(), AGREED, SIGNED)
 		consent = frappe.get_doc("Registration Consent", result["consent"])

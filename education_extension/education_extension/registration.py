@@ -24,6 +24,7 @@ from education_extension.education_extension.doctype.registration_period.registr
 from education_extension.education_extension.doctype.registration_settings.registration_settings import (
 	fee_block,
 	missing_result_blocks,
+	show_unverified_prerequisites,
 )
 from education_extension.education_extension.doctype.student_progress_report.student_progress_report import (
 	_program_semester,
@@ -369,6 +370,13 @@ def options_for(student, on=None):
 		for course, course_block in candidates.items()
 	]
 	rows.sort(key=lambda row: (row["block"], row["course"]))
+
+	# Stripped rather than never computed, so the rule stays in one place and only
+	# what leaves the server changes. The field stays present and empty: the page
+	# reads its length, and a missing key would be a different kind of bug.
+	if not show_unverified_prerequisites():
+		for row in rows:
+			row["unverified"] = []
 
 	return {
 		"state": "open",

@@ -36,6 +36,19 @@ def missing_result_blocks():
 	return frappe.db.get_single_value("Registration Settings", "missing_result_policy") == MISSING_BLOCKS
 
 
+def show_unverified_prerequisites():
+	"""Whether a student is shown which prerequisites have no result on record.
+
+	Off by default. It explains why a module is offered despite a prerequisite the
+	system cannot confirm, which is useful to whoever is diagnosing the
+	eligibility rules and not to the student, who cannot act on it — and it says
+	out loud that the institution's records are incomplete.
+	"""
+	return bool(
+		frappe.db.get_single_value("Registration Settings", "show_unverified_prerequisites")
+	)
+
+
 def outstanding_balance(student):
 	"""What the student owes: the outstanding total across their submitted Sales
 	Invoices. Zero when they have no linked Customer or no invoices."""

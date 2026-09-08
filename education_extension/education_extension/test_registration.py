@@ -472,6 +472,43 @@ class TestRegistrationFlow(IntegrationTestCase):
 			frappe.db.get_value("Registration Consent", created["consent"], "owner"), user
 		)
 
+	def unverified_anywhere(self):
+		return [
+			code
+			for group in self.options()["groups"]
+			for row in group["rows"]
+			for code in row["unverified"]
+		]
+
+	def test_unconfirmed_prerequisites_are_hidden_by_default(self):
+		"""Internal detail about the completeness of the records, not something a
+		student can act on — and it says out loud that the institution's results
+		are patchy. Off unless someone turns it on to diagnose the rules."""
+		field = "show_unverified_prerequisites"
+		original = frappe.db.get_single_value("Registration Settings", field)
+		try:
+			frappe.db.set_single_value("Registration Settings", field, 0)
+			frappe.clear_cache()
+			self.assertEqual(self.unverified_anywhere(), [])
+
+			# The field is still there and still a list: the page reads its length,
+			# and a missing key would be a different kind of bug.
+			for group in self.options()["groups"]:
+				for row in group["rows"]:
+					self.assertIsInstance(row["unverified"], list)
+
+			frappe.db.set_single_value("Registration Settings", field, 1)
+			frappe.clear_cache()
+			self.assertTrue(
+				self.unverified_anywhere(),
+				"turning it on should surface the unconfirmed prerequisites",
+			)
+		finally:
+			# Restored by hand: a Single is cached in redis, which outlives both the
+			# transaction and the process.
+			frappe.db.set_single_value("Registration Settings", field, original)
+			frappe.clear_cache()
+
 	def test_a_signature_is_required(self):
 		# Ticking a box is agreement; the form asks for a mark as well.
 		with self.assertRaises(frappe.ValidationError):

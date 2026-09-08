@@ -13,7 +13,9 @@
   "outstanding_fee_tolerance",
   "consent_section",
   "prerequisite_declaration",
-  "popia_consent"
+  "popia_consent",
+  "debugging_section",
+  "show_unverified_prerequisites"
  ],
  "fields": [
   {
@@ -67,6 +69,18 @@
    "fieldname": "popia_consent",
    "fieldtype": "Text Editor",
    "label": "POPIA Consent"
+  },
+  {
+   "fieldname": "debugging_section",
+   "fieldtype": "Section Break",
+   "label": "Debugging"
+  },
+  {
+   "default": "0",
+   "description": "Show students which prerequisites have no result on record. Off by default: it is internal detail about the completeness of the records rather than anything a student can act on. Turn it on to work out why a module is being offered or withheld, and turn it off again -- it applies to every student while it is on.",
+   "fieldname": "show_unverified_prerequisites",
+   "fieldtype": "Check",
+   "label": "Show Unconfirmed Prerequisites to Students"
   }
  ],
  "index_web_pages_for_search": 1,

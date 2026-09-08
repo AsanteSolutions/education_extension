@@ -7,3 +7,4 @@ education_extension.patches.convert_remark_codes
 # Patches added in this section will be executed after doctypes are migrated
 education_extension.patches.seed_course_prerequisites
 education_extension.patches.seed_registration_declarations
+education_extension.patches.move_lms_sync_into_the_app

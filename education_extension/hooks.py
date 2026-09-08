@@ -157,9 +157,25 @@ _RESOLVE_PROVISIONAL = {
 	"on_cancel": "education_extension.education_extension.registration.on_remark_change",
 }
 
+# Mirroring between the education records and the LMS, which used to be six
+# Server Scripts on before_insert and before_delete. On those events the mirror
+# sat on the critical path of the thing being mirrored, so anything it threw took
+# the original write down with it. These fire after the fact and only queue.
+_LMS_SYNC = "education_extension.education_extension.lms_sync."
+
 doc_events = {
 	"Academic Remark": _RESOLVE_PROVISIONAL,
 	"Supplementary Academic Remark": _RESOLVE_PROVISIONAL,
+	"Program Enrollment": {
+		"after_insert": _LMS_SYNC + "on_program_enrollment",
+		"on_trash": _LMS_SYNC + "on_program_enrollment_trash",
+	},
+	"Course Enrollment": {
+		"after_insert": _LMS_SYNC + "on_course_enrollment",
+		"on_trash": _LMS_SYNC + "on_course_enrollment_trash",
+	},
+	"LMS Program": {"after_insert": _LMS_SYNC + "on_lms_program"},
+	"LMS Course": {"after_insert": _LMS_SYNC + "on_lms_course"},
 }
 
 # Scheduled Tasks

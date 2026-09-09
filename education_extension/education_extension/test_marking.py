@@ -12,9 +12,9 @@ from education_extension.education_extension.doctype.student_progress_report.stu
 	calculate_final_results,
 )
 from education_extension.education_extension.marking import (
-	REMARK_CODES,
 	calculate_course_mark,
 	format_mark,
+	remark_codes,
 	resolve_results,
 	sitting_of,
 )
@@ -270,4 +270,13 @@ class TestMarking(FrappeTestCase):
 			)
 
 		self.assertTrue(legend, "no codes found in the legend — has the template changed?")
-		self.assertEqual(legend - set(REMARK_CODES), set())
+		self.assertEqual(legend - set(remark_codes()), set())
+
+	def test_both_remark_doctypes_offer_the_same_codes(self):
+		"""They are one field per sitting, and QA picks from whichever it is
+		editing. A code on one and not the other would be awardable in the first
+		semester and not the second."""
+		self.assertEqual(
+			remark_codes("Academic Remark"),
+			remark_codes("Supplementary Academic Remark"),
+		)

@@ -33,7 +33,7 @@
   },
   {
    "allow_on_submit": 1,
-   "description": "P = Passed (50-74%), PD = Passed with Distinction (75-100%), C = Condoned (49%), F = Failed (below 40%), FSUB = Failed Subminimum, NSM = No Semester Marks, DISC = Discontinued, SUPP = Supplementary, AEGRO = Aegrotat, PS = Passed Supplementary, FS = Failed Supplementary, PSE = Passed Special Exam, FSE = Failed Special Exam",
+   "description": "P = Passed (50-74%), PD = Passed with Distinction (75-100%), C = Condoned (49%), F = Failed (below 40%), FSUB = Failed Subminimum, NSM = No Semester Marks, DISC = Discontinued, SUPP = Supplementary, AEGRO = Aegrotat, PS = Passed Supplementary, FS = Failed Supplementary, PSE = Passed Special Exam, FSE = Failed Special Exam. Editable after submission, because QA revising a code is a judgement changing, not the result itself.",
    "fieldname": "remark",
    "fieldtype": "Select",
    "in_list_view": 1,

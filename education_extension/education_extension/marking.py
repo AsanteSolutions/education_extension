@@ -343,29 +343,32 @@ def student_marks(student, academic_year, academic_term):
 	return marks
 
 
-# The comments QA can put against a result. A fixed list rather than free text:
-# they are read off the printed report's legend, and a typo makes one invisible.
-REMARK_CODES = [
-	"P",
-	"PD",
-	"C",
-	"F",
-	"FSUB",
-	"NSM",
-	"DISC",
-	"SUPP",
-	"AEGRO",
-	"PS",
-	"FS",
-	"PSE",
-	"FSE",
-]
+# The two remark doctypes are the same field under two names, one per sitting.
+REMARK_FIELD = {
+	"Academic Remark": "remark",
+	"Supplementary Academic Remark": "supp_remark",
+}
+
+
+def remark_codes(doctype="Academic Remark"):
+	"""The comments QA can put against a result, read off the field that stores them.
+
+	A fixed list rather than free text: they are read off the printed report's
+	legend, and a typo makes one invisible. The list is not repeated here, though.
+	Frappe refuses a value outside the Select options, so a copy in Python could
+	only ever agree with the field or be wrong, and wrong is quiet in both
+	directions -- a code on the field but not in the copy cannot be picked, and one
+	in the copy but not on the field is offered and then refused on save.
+	"""
+	options = frappe.get_meta(doctype).get_field(REMARK_FIELD[doctype]).options or ""
+	return [code.strip() for code in options.splitlines() if code.strip()]
 
 
 @frappe.whitelist()
-def get_remark_codes():
+def get_remark_codes(supplementary=0):
 	"""So the QA view offers the same list the report legend explains."""
-	return REMARK_CODES
+	supplementary = frappe.parse_json(supplementary) if isinstance(supplementary, str) else supplementary
+	return remark_codes("Supplementary Academic Remark" if supplementary else "Academic Remark")
 
 
 @frappe.whitelist()
@@ -384,7 +387,7 @@ def set_course_remark(student, course, academic_year, academic_term, comment, su
 	fieldname = "supp_remark" if supplementary else "remark"
 
 	comment = (comment or "").strip()
-	if comment and comment not in REMARK_CODES:
+	if comment and comment not in remark_codes(doctype):
 		frappe.throw(_("{0} is not a comment code.").format(frappe.bold(comment)))
 
 	keys = {

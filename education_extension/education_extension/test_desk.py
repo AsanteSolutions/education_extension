@@ -81,13 +81,46 @@ class TestAppPage(IntegrationTestCase):
 	def test_the_tile_points_at_a_logo_that_is_there(self):
 		"""A missing logo is a broken image on the apps screen, and nothing in the
 		code says so."""
-		tile = self._tile()
+		self.assertTrue(os.path.exists(self._logo_path(self._tile()["logo"])))
+
+	def test_the_desk_carries_an_icon_for_this_app(self):
+		"""The apps screen and the desk are two different places, and a tile on
+		one puts nothing on the other. This app had the tile and no desk icon."""
+		self._needs_desktop_icons()
+		self.assertTrue(frappe.db.exists("Desktop Icon", desk.SOURCE))
+
+		icon = frappe.get_doc("Desktop Icon", desk.SOURCE)
+		self.assertEqual(icon.app, "education_extension")
+		self.assertEqual(icon.icon_type, "App")
+		self.assertTrue(icon.standard)
+		self.assertFalse(icon.hidden)
+
+	def test_the_desk_icon_opens_this_app_own_sidebar(self):
+		self._needs_desktop_icons()
+		icon = frappe.get_doc("Desktop Icon", desk.SOURCE)
+		self.assertEqual(icon.link_type, "Workspace Sidebar")
+		self.assertTrue(frappe.db.exists("Workspace Sidebar", icon.link_to), icon.link_to)
+
+	def test_the_desk_icon_and_the_tile_share_one_logo(self):
+		"""Two records naming the same file, so renaming it has to move both."""
+		self._needs_desktop_icons()
+		icon = frappe.get_doc("Desktop Icon", desk.SOURCE)
+		self.assertEqual(icon.logo_url, self._tile()["logo"])
+		self.assertTrue(os.path.exists(self._logo_path(icon.logo_url)), icon.logo_url)
+
+	def test_the_desk_icon_is_shown_to_the_same_people_as_the_page(self):
+		self._needs_desktop_icons()
+		icon = frappe.get_doc("Desktop Icon", desk.SOURCE)
+		self.assertEqual({row.role for row in icon.roles}, set(desk.STAFF_ROLES))
+
+	def _needs_desktop_icons(self):
+		if not frappe.db.exists("DocType", "Desktop Icon"):
+			self.skipTest("this Frappe has no Desktop Icon doctype")
+
+	def _logo_path(self, url):
 		prefix = "/assets/education_extension/"
-		self.assertTrue(tile["logo"].startswith(prefix), tile["logo"])
-		path = frappe.get_app_path(
-			"education_extension", "public", tile["logo"][len(prefix) :]
-		)
-		self.assertTrue(os.path.exists(path), path)
+		self.assertTrue(url.startswith(prefix), url)
+		return frappe.get_app_path("education_extension", "public", url[len(prefix) :])
 
 	def test_the_tile_points_at_this_app_own_page(self):
 		self.assertEqual(self._tile()["route"], "/app/" + frappe.scrub(desk.SOURCE).replace("_", "-"))

@@ -1,0 +1,248 @@
+{
+ "app": "education_extension",
+ "charts": [],
+ "content": "[{\"id\": \"ee-shortcuts-head\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Your Shortcuts</b></span>\", \"col\": 12}}, {\"id\": \"ee-sc-0\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Course Mark Sheet\", \"col\": 3}}, {\"id\": \"ee-sc-1\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Registration Consent\", \"col\": 3}}, {\"id\": \"ee-sc-2\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Academic Remark\", \"col\": 3}}, {\"id\": \"ee-spacer\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"ee-cards-head\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Registration and Marking</b></span>\", \"col\": 12}}, {\"id\": \"ee-card-registration\", \"type\": \"card\", \"data\": {\"card_name\": \"Registration\", \"col\": 4}}, {\"id\": \"ee-card-marking\", \"type\": \"card\", \"data\": {\"card_name\": \"Marking\", \"col\": 4}}, {\"id\": \"ee-card-results-and-remarks\", \"type\": \"card\", \"data\": {\"card_name\": \"Results and Remarks\", \"col\": 4}}]",
+ "creation": "2026-09-09 12:00:00.000000",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "review",
+ "idx": 0,
+ "is_hidden": 0,
+ "label": "Education Extension",
+ "links": [
+  {
+   "hidden": 0,
+   "icon": "user-round-plus",
+   "is_query_report": 0,
+   "label": "Registration",
+   "link_count": 4,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Registration Period",
+   "link_count": 0,
+   "link_to": "Registration Period",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Registration Consent",
+   "link_count": 0,
+   "link_to": "Registration Consent",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Registration Status",
+   "link_count": 0,
+   "link_to": "Registration Status",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Registration Settings",
+   "link_count": 0,
+   "link_to": "Registration Settings",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "icon": "clipboard-check",
+   "is_query_report": 0,
+   "label": "Marking",
+   "link_count": 5,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Course Mark Sheet",
+   "link_count": 0,
+   "link_to": "Course Mark Sheet",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Course Mark Scheme",
+   "link_count": 0,
+   "link_to": "Course Mark Scheme",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Mark Change",
+   "link_count": 0,
+   "link_to": "Mark Change",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Course Results",
+   "link_count": 0,
+   "link_to": "Course Results",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Marking Settings",
+   "link_count": 0,
+   "link_to": "Marking Settings",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "icon": "award",
+   "is_query_report": 0,
+   "label": "Results and Remarks",
+   "link_count": 5,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Academic Remark",
+   "link_count": 0,
+   "link_to": "Academic Remark",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Supplementary Academic Remark",
+   "link_count": 0,
+   "link_to": "Supplementary Academic Remark",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Student Progress Report",
+   "link_count": 0,
+   "link_to": "Student Progress Report",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Progress Report Issue Date",
+   "link_count": 0,
+   "link_to": "Progress Report Issue Date",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Student Progress Report Settings",
+   "link_count": 0,
+   "link_to": "Student Progress Report Settings",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-09-09 12:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "Education Extension",
+ "name": "Education Extension",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "restrict_to_domain": "",
+ "roles": [
+  {
+   "role": "System Manager"
+  },
+  {
+   "role": "Education Manager"
+  },
+  {
+   "role": "Academics User"
+  },
+  {
+   "role": "Instructor"
+  }
+ ],
+ "sequence_id": 9.1,
+ "shortcuts": [
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Course Mark Sheet",
+   "link_to": "Course Mark Sheet",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Registration Consent",
+   "link_to": "Registration Consent",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Academic Remark",
+   "link_to": "Academic Remark",
+   "type": "DocType"
+  }
+ ],
+ "title": "Education Extension",
+ "type": "Workspace"
+}

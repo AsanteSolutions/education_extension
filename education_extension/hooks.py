@@ -162,6 +162,7 @@ _RESOLVE_PROVISIONAL = {
 # sat on the critical path of the thing being mirrored, so anything it threw took
 # the original write down with it. These fire after the fact and only queue.
 _LMS_SYNC = "education_extension.education_extension.lms_sync."
+_STUDENT_PERMISSIONS = "education_extension.education_extension.student_permissions."
 
 doc_events = {
 	"Academic Remark": _RESOLVE_PROVISIONAL,
@@ -176,6 +177,14 @@ doc_events = {
 	},
 	"LMS Program": {"after_insert": _LMS_SYNC + "on_lms_program"},
 	"LMS Course": {"after_insert": _LMS_SYNC + "on_lms_course"},
+	# A student sees their own records and no one else's. Role permissions are
+	# per doctype and cannot say "only your own", so it takes a User Permission,
+	# created here for every new student and moved if their account changes.
+	"Student": {
+		"after_insert": _STUDENT_PERMISSIONS + "on_student_insert",
+		"on_update": _STUDENT_PERMISSIONS + "on_student_update",
+		"on_trash": _STUDENT_PERMISSIONS + "on_student_trash",
+	},
 }
 
 # Scheduled Tasks

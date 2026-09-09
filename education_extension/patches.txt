@@ -9,3 +9,4 @@ education_extension.patches.seed_course_prerequisites
 education_extension.patches.seed_registration_declarations
 education_extension.patches.move_lms_sync_into_the_app
 education_extension.patches.seed_registrar_name
+education_extension.patches.confine_students_to_their_own_records

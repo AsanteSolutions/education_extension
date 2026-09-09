@@ -641,6 +641,74 @@ class TestRegistrationFlow(IntegrationTestCase):
 		]
 		self.assertEqual(creators, [], "nobody should be able to author a consent by hand")
 
+	def test_a_student_sees_only_their_own_records(self):
+		"""Role permissions are per doctype and cannot say "only your own".
+
+		Without a User Permission a logged-in student could list every other
+		student — name, ID number, date of birth — and every assessment result on
+		the site.
+		"""
+		user = frappe.db.get_value("Student", self.student, "user")
+		if not user:
+			self.skipTest("student has no portal user")
+		if not frappe.db.exists(
+			"User Permission", {"user": user, "allow": "Student", "for_value": self.student}
+		):
+			self.skipTest("students are not confined on this site")
+
+		frappe.set_user(user)
+		try:
+			self.assertEqual(
+				[row.name for row in frappe.get_list("Student", limit_page_length=0)],
+				[self.student],
+			)
+			for doctype in ("Assessment Result", "Academic Remark", "Program Enrollment"):
+				rows = frappe.get_list(doctype, fields=["student"], limit_page_length=0)
+				self.assertEqual(
+					{row.student for row in rows} - {self.student},
+					set(),
+					f"{doctype} leaked another student",
+				)
+		finally:
+			frappe.set_user("Administrator")
+
+	def test_confining_students_leaves_the_shared_records_alone(self):
+		"""A User Permission only constrains doctypes that link to Student, which
+		is what keeps the curriculum and the LMS out of it."""
+		user = frappe.db.get_value("Student", self.student, "user")
+		if not user:
+			self.skipTest("student has no portal user")
+
+		frappe.set_user(user)
+		try:
+			# The schedule is the one the portal would visibly lose.
+			self.assertEqual(
+				len(frappe.get_list("Course Schedule", limit_page_length=0)),
+				frappe.db.count("Course Schedule"),
+			)
+			self.assertEqual(
+				len(frappe.get_list("Program", limit_page_length=0)),
+				frappe.db.count("Program"),
+			)
+		finally:
+			frappe.set_user("Administrator")
+
+	def test_staff_are_never_confined(self):
+		"""A user who is both a student and staff would otherwise lose the
+		cross-student view their job needs the moment the backfill ran."""
+		from education_extension.education_extension import student_permissions
+
+		self.assertTrue(student_permissions.is_staff("Administrator"))
+		self.assertEqual(
+			student_permissions.confine(self.student, "Administrator"), "staff"
+		)
+		self.assertFalse(
+			frappe.db.exists(
+				"User Permission",
+				{"user": "Administrator", "allow": "Student", "for_value": self.student},
+			)
+		)
+
 	def test_a_signature_is_required(self):
 		# Ticking a box is agreement; the form asks for a mark as well.
 		with self.assertRaises(frappe.ValidationError):

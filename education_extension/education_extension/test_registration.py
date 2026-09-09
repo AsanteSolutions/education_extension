@@ -584,6 +584,63 @@ class TestRegistrationFlow(IntegrationTestCase):
 
 		self.assertEqual(consent.proof_of_registration().modules, [])
 
+	def test_a_student_cannot_read_another_students_consent(self):
+		"""The record carries a name, an ID number and a signature.
+
+		Read permission without `if_owner` let any student list every consent on
+		the site, which on a POPIA consent document is precisely backwards.
+		"""
+		user = frappe.db.get_value("Student", self.student, "user")
+		if not user:
+			self.skipTest("student has no portal user")
+
+		other = frappe.db.get_value(
+			"Student", {"user": ["is", "set"], "name": ["!=", self.student]}, "name"
+		)
+		theirs = frappe.get_doc(
+			{
+				"doctype": "Registration Consent",
+				"student": other,
+				"academic_year": "2026",
+				"academic_term": self.term,
+				"consented_at": nowdate(),
+				"prerequisites_declared": 1,
+				"popia_consented": 1,
+				"declaration_text": "<p>x</p>",
+				"consent_text": "<p>y</p>",
+				"student_signature": SIGNED["student"],
+			}
+		)
+		theirs.flags.ignore_permissions = True
+		theirs.insert()
+
+		frappe.set_user(user)
+		try:
+			self.assertFalse(
+				frappe.has_permission("Registration Consent", "read", doc=theirs.name)
+			)
+			listed = frappe.get_list(
+				"Registration Consent", fields=["student"], limit_page_length=0
+			)
+			self.assertNotIn(other, [row.student for row in listed])
+		finally:
+			frappe.set_user("Administrator")
+
+	def test_a_consent_cannot_be_created_through_the_api(self):
+		"""No role holds create on it, by design.
+
+		A consent is evidence of something a student did; one that could be keyed
+		in afterwards is not. It exists only because `register` writes it with
+		permissions ignored, which is the single path that also records the wording
+		and the signature.
+		"""
+		creators = [
+			perm.role
+			for perm in frappe.get_meta("Registration Consent").permissions
+			if perm.create or perm.write or perm.cancel or perm.amend
+		]
+		self.assertEqual(creators, [], "nobody should be able to author a consent by hand")
+
 	def test_a_signature_is_required(self):
 		# Ticking a box is agreement; the form asks for a mark as well.
 		with self.assertRaises(frappe.ValidationError):

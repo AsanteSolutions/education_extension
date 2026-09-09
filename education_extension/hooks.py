@@ -19,16 +19,18 @@ website_route_rules = [
 
 # required_apps = []
 
-# Each item in the list will be shown as an app in the apps page
-# add_to_apps_screen = [
-# 	{
-# 		"name": "education_extension",
-# 		"logo": "/assets/education_extension/logo.png",
-# 		"title": "Education Extension",
-# 		"route": "/education_extension",
-# 		"has_permission": "education_extension.api.permission.has_app_permission"
-# 	}
-# ]
+# Shown as its own tile on the apps screen, next to Education rather than buried
+# inside it. The route is this app own workspace; the permission check keeps the
+# tile off the screen of anyone who has no business on that page.
+add_to_apps_screen = [
+	{
+		"name": "education_extension",
+		"logo": "/assets/education_extension/education-extension-logo.svg",
+		"title": "Education Extension",
+		"route": "/app/education-extension",
+		"has_permission": "education_extension.education_extension.desk.has_app_permission",
+	}
+]
 
 # Includes in <head>
 # ------------------

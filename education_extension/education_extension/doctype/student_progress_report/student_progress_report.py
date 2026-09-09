@@ -32,6 +32,15 @@ ISSUE_DATE_SUPPLEMENTARY = "Supplementary"
 ISSUE_DATE_REMARKING = "Remarking"
 ISSUE_DATE_AEGROTAT = "AEGROTAT"
 
+# Which sittings a course is examined and assessed on. These are the exceptions
+# to the standard shape (two tests, two assignments, a practical test, and theory,
+# practical and oral papers); a course code absent from a set follows the standard.
+# Module-level so Course Mark Scheme can generate the equivalent scheme rows from
+# them instead of keeping a second copy.
+NO_PRAC_OR_ORAL_EXAM = {"OCAH1101", "ANH2305", "AEC2301", "ANH3503", "AEC2302", "ANH3507", "ANH3506"}
+NO_PRAC_TEST = {"OCAH1101", "ANH2305", "AEC2301", "AEC2302", "ANH3507", "ANH2404"}
+NO_ORAL_EXAM = {"CLT1101"}
+
 
 class StudentProgressReport(Document):
 	pass
@@ -41,7 +50,12 @@ def preview_progress_report(doc):
     # `doc` arrives as a JSON string from the desk form; tolerate an already-parsed
     # dict so the endpoint also works when called with a JSON request body.
     doc = frappe._dict(json.loads(doc) if isinstance(doc, str) else doc)
-    results = calculate_final_results(get_results(doc))
+    # Marked from the course's Course Mark Scheme where it has one, and from
+    # the calculation below where it does not. Imported here rather than at the
+    # top because marking reads that fallback calculation from this module.
+    from education_extension.education_extension.marking import final_marks
+
+    results = final_marks(doc.student, doc.academic_year, doc.academic_term)
     courses = results.keys() if results else []
     results_remarks = get_academic_remarks(doc)
     supplementary = get_supplementary_results(doc)
@@ -351,9 +365,18 @@ def _has_aegrotat_result(doc):
 
 
 def _has_remarked_result(doc):
-	"""True when a result or remark for the term has been remarked. Correcting a
-	submitted document in Frappe means cancelling and amending it, so the amendment
-	(`amended_from` set) is the trace a remark leaves behind."""
+	"""True when something for the term has been marked again.
+
+	A Mark Change says so outright. Before that document existed the only trace
+	was an amendment — correcting a submitted document in Frappe means cancelling
+	and amending it — so both still count."""
+	from education_extension.education_extension.doctype.mark_change.mark_change import (
+		has_remark_changes,
+	)
+
+	if has_remark_changes(doc.student, doc.academic_term):
+		return True
+
 	for doctype in ("Assessment Result", "Academic Remark"):
 		if frappe.get_all(
 			doctype,
@@ -470,16 +493,32 @@ def _assessment_field(assessment_group, group_to_field):
 
 
 def calculate_final_results(results):
-    """Calculate the final mark for every course the student has assessment
-    results for, returning a dict keyed by course code (value "-" until both
-    the DP and exam components are complete)."""
+    """Final mark per course, keyed by course code, in the form the report prints:
+    "-" until both the DP and the exam components are complete."""
+    return {
+        course: format_legacy_mark(marks)
+        for course, marks in calculate_final_results_detailed(results).items()
+    }
+
+
+def format_legacy_mark(marks):
+    return (
+        round_half_up(marks["final_mark"])
+        if marks["dp_complete"] and marks["exams_complete"]
+        else "-"
+    )
+
+
+def calculate_final_results_detailed(results):
+    """The calculation in full: DP, final mark and both completeness flags per
+    course, worked out from the weightings written into this module.
+
+    This is the fallback for a course that has no Course Mark Scheme yet, which
+    is why it reports the DP rather than only the final mark — an unconverted
+    course still has to show one on the portal."""
 
     NUMBER_OF_ASSIGNMENTS = 2
     NUMBER_OF_TESTS = 2
-
-    NO_PRAC_OR_ORAL_EXAM = {"OCAH1101", "ANH2305", "AEC2301", "ANH3503", "AEC2302", "ANH3507", "ANH3506"}
-    NO_PRAC_TEST = {"OCAH1101", "ANH2305", "AEC2301", "AEC2302", "ANH3507", "ANH2404"}
-    NO_ORAL_EXAM = {"CLT1101"}
 
     group_to_field = {
         "Assignment 1": "assignment_1",
@@ -568,9 +607,11 @@ def calculate_final_results(results):
                 exam_mark += (oral / 100.0) * 10.0 * 0.5
             exams_complete = theory is not None and prac is not None and oral is not None
 
-        if dp_complete and exams_complete:
-            final_results[course] = round_half_up(exam_mark + dp * 0.5)
-        else:
-            final_results[course] = "-"
+        final_results[course] = {
+            "dp": dp,
+            "final_mark": exam_mark + dp * 0.5,
+            "dp_complete": dp_complete,
+            "exams_complete": exams_complete,
+        }
 
     return final_results

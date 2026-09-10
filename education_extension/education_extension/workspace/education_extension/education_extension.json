@@ -1,7 +1,20 @@
 {
  "app": "education_extension",
- "charts": [],
- "content": "[{\"id\": \"ee-shortcuts-head\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Your Shortcuts</b></span>\", \"col\": 12}}, {\"id\": \"ee-sc-0\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Course Mark Sheet\", \"col\": 3}}, {\"id\": \"ee-sc-1\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Registration Consent\", \"col\": 3}}, {\"id\": \"ee-sc-2\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Academic Remark\", \"col\": 3}}, {\"id\": \"ee-spacer\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"ee-cards-head\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Registration and Marking</b></span>\", \"col\": 12}}, {\"id\": \"ee-card-registration\", \"type\": \"card\", \"data\": {\"card_name\": \"Registration\", \"col\": 4}}, {\"id\": \"ee-card-marking\", \"type\": \"card\", \"data\": {\"card_name\": \"Marking\", \"col\": 4}}, {\"id\": \"ee-card-results-and-remarks\", \"type\": \"card\", \"data\": {\"card_name\": \"Results and Remarks\", \"col\": 4}}]",
+ "charts": [
+  {
+   "chart_name": "Registration Progress",
+   "label": "Registration Progress"
+  },
+  {
+   "chart_name": "Registrations Per Day",
+   "label": "Registrations Per Day"
+  },
+  {
+   "chart_name": "Registrations By Programme",
+   "label": "Registrations By Programme"
+  }
+ ],
+ "content": "[{\"id\": \"ee-dash-head\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Registration This Term</b></span>\", \"col\": 12}}, {\"id\": \"ee-nc-0\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Students Registered\", \"col\": 4}}, {\"id\": \"ee-nc-1\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Students Still To Register\", \"col\": 4}}, {\"id\": \"ee-nc-2\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Days Left To Register\", \"col\": 4}}, {\"id\": \"ee-nc-3\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Provisional Modules\", \"col\": 4}}, {\"id\": \"ee-nc-4\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Modules Needing Review\", \"col\": 4}}, {\"id\": \"ee-nc-5\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Consent Forms Signed\", \"col\": 4}}, {\"id\": \"ee-ch-0\", \"type\": \"chart\", \"data\": {\"chart_name\": \"Registration Progress\", \"col\": 6}}, {\"id\": \"ee-ch-1\", \"type\": \"chart\", \"data\": {\"chart_name\": \"Registrations Per Day\", \"col\": 6}}, {\"id\": \"ee-ch-2\", \"type\": \"chart\", \"data\": {\"chart_name\": \"Registrations By Programme\", \"col\": 12}}, {\"id\": \"ee-dash-spacer\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"ee-shortcuts-head\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Your Shortcuts</b></span>\", \"col\": 12}}, {\"id\": \"ee-sc-0\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Course Mark Sheet\", \"col\": 3}}, {\"id\": \"ee-sc-1\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Registration Consent\", \"col\": 3}}, {\"id\": \"ee-sc-2\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Academic Remark\", \"col\": 3}}, {\"id\": \"ee-spacer\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"ee-cards-head\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Registration and Marking</b></span>\", \"col\": 12}}, {\"id\": \"ee-card-registration\", \"type\": \"card\", \"data\": {\"card_name\": \"Registration\", \"col\": 4}}, {\"id\": \"ee-card-marking\", \"type\": \"card\", \"data\": {\"card_name\": \"Marking\", \"col\": 4}}, {\"id\": \"ee-card-results-and-remarks\", \"type\": \"card\", \"data\": {\"card_name\": \"Results and Remarks\", \"col\": 4}}]",
  "creation": "2026-09-09 12:00:00.000000",
  "custom_blocks": [],
  "docstatus": 0,
@@ -195,11 +208,36 @@
    "type": "Link"
   }
  ],
- "modified": "2026-09-09 12:30:00.000000",
+ "modified": "2026-09-10 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Education Extension",
  "name": "Education Extension",
- "number_cards": [],
+ "number_cards": [
+  {
+   "label": "Students Registered",
+   "number_card_name": "Students Registered"
+  },
+  {
+   "label": "Students Still To Register",
+   "number_card_name": "Students Still To Register"
+  },
+  {
+   "label": "Days Left To Register",
+   "number_card_name": "Days Left To Register"
+  },
+  {
+   "label": "Provisional Modules",
+   "number_card_name": "Provisional Modules"
+  },
+  {
+   "label": "Modules Needing Review",
+   "number_card_name": "Modules Needing Review"
+  },
+  {
+   "label": "Consent Forms Signed",
+   "number_card_name": "Consent Forms Signed"
+  }
+ ],
  "owner": "Administrator",
  "parent_page": "",
  "public": 1,

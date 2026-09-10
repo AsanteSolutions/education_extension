@@ -1,0 +1,49 @@
+{
+ "cards": [
+  {
+   "card": "Students Registered"
+  },
+  {
+   "card": "Students Still To Register"
+  },
+  {
+   "card": "Days Left To Register"
+  },
+  {
+   "card": "Provisional Modules"
+  },
+  {
+   "card": "Modules Needing Review"
+  },
+  {
+   "card": "Consent Forms Signed"
+  }
+ ],
+ "chart_options": "",
+ "charts": [
+  {
+   "chart": "Registration Progress",
+   "width": "Full"
+  },
+  {
+   "chart": "Registrations By Programme",
+   "width": "Half"
+  },
+  {
+   "chart": "Registrations Per Day",
+   "width": "Half"
+  }
+ ],
+ "creation": "2026-09-10 09:00:00.000000",
+ "dashboard_name": "Registration",
+ "docstatus": 0,
+ "doctype": "Dashboard",
+ "idx": 0,
+ "is_default": 0,
+ "is_standard": 1,
+ "modified": "2026-09-10 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Education Extension",
+ "name": "Registration",
+ "owner": "Administrator"
+}

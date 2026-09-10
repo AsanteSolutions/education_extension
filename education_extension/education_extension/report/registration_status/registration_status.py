@@ -89,6 +89,12 @@ def rows(filters):
 				"student": student.name,
 				"student_name": student.student_name,
 				"status": status,
+				# Not a column — the report has no room for it and nobody reading a
+				# list of students needs the number. It is here because the block is
+				# worked out above either way, and the dashboard groups by it. Left
+				# out, the dashboard would have to derive it a second way and would
+				# eventually disagree with this list about who is in which year.
+				"block": _registered_block(registered) if registered else expected,
 				# Only shown for a student who has not registered, which is the only
 				# one it answers a question about. It is derived from enrolment
 				# history, and on a site adopted mid-programme that history is thin
@@ -109,6 +115,18 @@ def rows(filters):
 	order = {NOT_REGISTERED: 0, REGISTERED: 1, NOT_THIS_TERM: 2}
 	out.sort(key=lambda row: (order[row["status"]], -row["needs_review"], row["student"]))
 	return out
+
+
+def _registered_block(registered):
+	"""The block a student actually registered into.
+
+	The furthest, for the rare student registered across two programmes at once:
+	the later one is the block they are really in, and the earlier is a
+	carry-over they are repeating alongside it.
+	"""
+	blocks = [_program_semester(program) for program in registered["programs"]]
+	blocks = [block for block in blocks if block]
+	return max(blocks) if blocks else None
 
 
 def expected_block(furthest, ordinal, offered):

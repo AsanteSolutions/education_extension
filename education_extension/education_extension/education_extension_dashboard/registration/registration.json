@@ -26,6 +26,10 @@
    "width": "Full"
   },
   {
+   "chart": "Registration Progress Per Year",
+   "width": "Full"
+  },
+  {
    "chart": "Registrations By Programme",
    "width": "Half"
   },
@@ -41,7 +45,7 @@
  "idx": 0,
  "is_default": 0,
  "is_standard": 1,
- "modified": "2026-09-10 09:00:00.000000",
+ "modified": "2026-09-10 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Education Extension",
  "name": "Registration",

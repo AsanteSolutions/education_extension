@@ -104,27 +104,36 @@ class TestDashboardWiring(IntegrationTestCase):
 		for row in doc.charts:
 			self.assertTrue(frappe.db.exists("Dashboard Chart", row.chart), row.chart)
 
-	def test_the_workspace_shows_the_same_cards_and_charts(self):
-		"""They are on the page the desk icon opens as well as on the dashboard,
-		and a block naming a card that is not there renders as a gap."""
+	def test_the_dashboard_is_reachable_from_the_sidebar(self):
+		"""The only route to it, since the numbers are not on the workspace page.
+		A dashboard nothing links to is a dashboard nobody opens."""
+		if not frappe.db.exists("Workspace Sidebar", MODULE):
+			self.skipTest("no sidebar on this site")
+
+		sidebar = frappe.get_doc("Workspace Sidebar", MODULE)
+		linked = {row.link_to for row in sidebar.items if row.link_type == "Dashboard"}
+		self.assertIn("Registration", linked)
+
+	def test_the_workspace_page_stays_a_page_of_links(self):
+		"""The numbers belong on the dashboard. The workspace is where someone
+		goes to open a record, and widgets drifting back onto it is the thing
+		worth catching."""
 		if not frappe.db.exists("Workspace", MODULE):
 			self.skipTest("the workspace has not been synced on this site")
 
-		workspace = frappe.get_doc("Workspace", MODULE)
-		for row in workspace.number_cards:
-			self.assertTrue(frappe.db.exists("Number Card", row.number_card_name))
-		for row in workspace.charts:
-			self.assertTrue(frappe.db.exists("Dashboard Chart", row.chart_name))
-
 		import json
 
-		for block in json.loads(workspace.content or "[]"):
-			if block.get("type") == "number_card":
-				self.assertTrue(
-					frappe.db.exists("Number Card", block["data"]["number_card_name"])
-				)
-			if block.get("type") == "chart":
-				self.assertTrue(frappe.db.exists("Dashboard Chart", block["data"]["chart_name"]))
+		workspace = frappe.get_doc("Workspace", MODULE)
+		self.assertEqual(list(workspace.number_cards), [])
+		self.assertEqual(list(workspace.charts), [])
+		self.assertEqual(
+			[
+				block["type"]
+				for block in json.loads(workspace.content or "[]")
+				if block["type"] in ("number_card", "chart")
+			],
+			[],
+		)
 
 
 class TestDashboardNumbers(IntegrationTestCase):

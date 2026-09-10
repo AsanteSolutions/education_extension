@@ -240,6 +240,42 @@ def by_programme(filters=None):
 	}
 
 
+def per_year(filters=None):
+	"""Registration progress by year of study, first years through final years.
+
+	The one breakdown that says where to go rather than only how far along the
+	whole thing is. A cohort that is behind is behind for a reason — a
+	prerequisite most of them failed, a programme whose modules are not on
+	offer, a group nobody told — and it is invisible in a single total.
+
+	Blocks come in pairs, one year to a pair: semesters 1 and 2 are the first
+	years, 3 and 4 the second. Students with no block are left out rather than
+	bundled into a year they are not in; there is nothing to chase there, since
+	they are not due to register this term at all.
+	"""
+	years = {}
+	for row in _rows(chosen_term(filters)):
+		if row["status"] == NOT_THIS_TERM or not row.get("block"):
+			continue
+		bucket = years.setdefault((row["block"] + 1) // 2, {REGISTERED: 0, NOT_REGISTERED: 0})
+		bucket[row["status"]] = bucket.get(row["status"], 0) + 1
+
+	if not years:
+		return empty(_("Students"))
+
+	ordered = sorted(years)
+	return {
+		"labels": [_("Year {0}").format(year) for year in ordered],
+		"datasets": [
+			{"name": _("Registered"), "values": [years[year][REGISTERED] for year in ordered]},
+			{
+				"name": _("Still to register"),
+				"values": [years[year][NOT_REGISTERED] for year in ordered],
+			},
+		],
+	}
+
+
 def per_day(filters=None):
 	"""Registrations by the day they were made, across the whole window.
 

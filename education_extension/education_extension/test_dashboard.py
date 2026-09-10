@@ -262,17 +262,44 @@ class TestDashboardNumbers(IntegrationTestCase):
 		rather than as a closed window."""
 		self.assertGreaterEqual(dashboard.days_left_to_register()["value"], 0)
 
+	def test_the_year_chart_adds_up_to_the_cards(self):
+		"""It splits the same two numbers across the years of study, so the two
+		series have to come back to the two cards. A student counted into the
+		wrong year would still total correctly; a student dropped would not."""
+		chart = dashboard.per_year()
+		registered, still = chart["datasets"][0], chart["datasets"][1]
+
+		self.assertEqual(registered["name"], "Registered")
+		self.assertEqual(sum(registered["values"]), dashboard.students_registered()["value"])
+		self.assertEqual(
+			sum(still["values"]), dashboard.students_still_to_register()["value"]
+		)
+
+	def test_the_report_gives_every_countable_student_a_block(self):
+		"""The year chart groups on it. If the report stopped supplying it the
+		chart would empty out and nothing else would notice."""
+		term = dashboard.term_in_focus()
+		if not term:
+			self.skipTest("no registration period on this site")
+
+		for row in dashboard.rows_in_focus(term):
+			if row["status"] == NOT_THIS_TERM:
+				continue
+			self.assertTrue(
+				row.get("block"), "{0} is countable but has no block".format(row["student"])
+			)
+
 	def test_every_chart_returns_the_shape_the_widget_expects(self):
 		for name, chart in (
 			("progress", dashboard.progress()),
 			("by_programme", dashboard.by_programme()),
 			("per_day", dashboard.per_day()),
+			("per_year", dashboard.per_year()),
 		):
 			self.assertIn("labels", chart, name)
-			self.assertEqual(len(chart["datasets"]), 1, name)
-			self.assertEqual(
-				len(chart["labels"]), len(chart["datasets"][0]["values"]), name
-			)
+			self.assertTrue(chart["datasets"], name)
+			for dataset in chart["datasets"]:
+				self.assertEqual(len(chart["labels"]), len(dataset["values"]), name)
 
 
 class TestDashboardPermissions(IntegrationTestCase):

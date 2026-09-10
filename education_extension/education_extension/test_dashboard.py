@@ -63,6 +63,36 @@ class TestDashboardWiring(IntegrationTestCase):
 				frappe.db.exists("Dashboard Chart Source", chart.source), chart.source
 			)
 
+	def test_every_chart_source_ships_the_javascript_that_registers_it(self):
+		"""A Custom chart is not fetched through the Dashboard Chart endpoint —
+		that one has no branch for it. The browser asks for the source's own `.js`,
+		evaluates it, and calls whatever method it registers.
+
+		Ship the `.py` without the `.js` and the chart draws nothing and reports
+		nothing: an empty box, no error in the console, no error in the log. All
+		three of these shipped that way once. This walks the same path the client
+		does, so the wiring is checked rather than the counting.
+		"""
+		from frappe.desk.doctype.dashboard_chart_source.dashboard_chart_source import get_config
+
+		sources = frappe.get_all("Dashboard Chart", filters={"module": MODULE}, pluck="source")
+		self.assertTrue(sources)
+
+		for source in sources:
+			config = get_config(source)
+			self.assertIn("frappe.dashboards.chart_sources", config, source)
+			self.assertIn(source, config, source)
+
+			method = config.split('method: "')[1].split('"')[0]
+			resolved = frappe.get_attr(method)
+			self.assertTrue(callable(resolved), method)
+
+			chart = resolved(chart_name=source, refresh=1)
+			self.assertIn("labels", chart, source)
+			self.assertEqual(
+				len(chart["labels"]), len(chart["datasets"][0]["values"]), source
+			)
+
 	def test_the_dashboard_names_only_cards_and_charts_that_exist(self):
 		self.assertTrue(frappe.db.exists("Dashboard", "Registration"))
 		doc = frappe.get_doc("Dashboard", "Registration")

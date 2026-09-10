@@ -104,6 +104,66 @@ class TestDashboardWiring(IntegrationTestCase):
 		for row in doc.charts:
 			self.assertTrue(frappe.db.exists("Dashboard Chart", row.chart), row.chart)
 
+	def test_every_card_drills_down_somewhere_real(self):
+		"""The widget binds a click handler to every card whatever its type, so a
+		card without a `route` in its payload is clickable and does nothing. That
+		reads as broken rather than as "this one does not drill down"."""
+		for card in frappe.get_all(
+			"Number Card", filters={"module": MODULE}, fields=["name", "method"]
+		):
+			payload = frappe.get_attr(card.method)()
+			route = payload.get("route")
+			self.assertTrue(route, "{0} has nowhere to go".format(card.name))
+
+			kind = route[0]
+			if kind == "query-report":
+				self.assertTrue(frappe.db.exists("Report", route[1]), route)
+			elif kind == "List":
+				self.assertTrue(frappe.db.exists("DocType", route[1]), route)
+			elif kind == "Form":
+				self.assertTrue(frappe.db.exists(route[1], route[2]), route)
+			else:
+				self.fail("unrecognised route {0} on {1}".format(route, card.name))
+
+	def test_every_chart_offers_a_filter(self):
+		"""The dialog is built from the `filters` the source's javascript
+		declares. Declare none and the button opens an empty box."""
+		from frappe.desk.doctype.dashboard_chart_source.dashboard_chart_source import get_config
+
+		for source in frappe.get_all(
+			"Dashboard Chart", filters={"module": MODULE}, pluck="source"
+		):
+			config = get_config(source)
+			self.assertIn("filters:", config, source)
+			self.assertIn("academic_term", config, source)
+
+	def test_a_chart_honours_the_term_it_is_given(self):
+		"""Otherwise the filter is there, does nothing, and quietly tells the
+		reader the two terms are identical."""
+		terms = frappe.get_all("Academic Term", pluck="name")
+		focus = dashboard.term_in_focus()
+		other = [term for term in terms if term != focus]
+		if not other or not focus:
+			self.skipTest("only one academic term on this site")
+
+		self.assertEqual(
+			dashboard.progress({"academic_term": focus}), dashboard.progress()
+		)
+		# Some other term has to differ somewhere, or the filter proves nothing.
+		self.assertTrue(
+			any(
+				dashboard.progress({"academic_term": term}) != dashboard.progress()
+				for term in other
+			),
+			"no term produced different numbers",
+		)
+
+	def test_an_unset_filter_falls_back_to_the_term_in_focus(self):
+		"""The widget sends the empty case in more than one shape."""
+		focus = dashboard.term_in_focus()
+		for payload in (None, {}, [], "[]", "{}"):
+			self.assertEqual(dashboard.chosen_term(payload), focus, repr(payload))
+
 	def test_the_dashboard_is_reachable_from_the_sidebar(self):
 		"""The only route to it, since the numbers are not on the workspace page.
 		A dashboard nothing links to is a dashboard nobody opens."""

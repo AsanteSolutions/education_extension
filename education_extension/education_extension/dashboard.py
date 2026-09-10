@@ -77,50 +77,111 @@ def registrar_only():
 	frappe.only_for(tuple(sorted(STAFF_ROLES)))
 
 
-def _rows():
+def chosen_term(filters=None):
+	"""The term a chart's own filter names, or the one in focus.
+
+	The filter is there so a registrar can look back at a window that has
+	already closed. Leaving it empty is the ordinary case and means "the one
+	that matters now", which is why nothing here requires it.
+	"""
+	if isinstance(filters, str):
+		filters = frappe.parse_json(filters)
+	if isinstance(filters, list):
+		# The chart widget sends a list when nothing has been picked.
+		filters = {}
+	return (filters or {}).get("academic_term") or term_in_focus()
+
+
+def _rows(term=None):
 	registrar_only()
-	term = term_in_focus()
+	term = term or term_in_focus()
 	return rows_in_focus(term) if term else []
 
 
+def period_for(term):
+	"""The window a term was registered in. One period per term, named for it."""
+	if term and frappe.db.exists("Registration Period", term):
+		return frappe.get_cached_doc("Registration Period", term)
+	return period_in_focus()
+
+
 # --- the number cards ------------------------------------------------------
+#
+# Each returns a `route` as well as a number. Without one the card is still
+# clickable — the widget binds the handler regardless — and clicking does
+# nothing at all, which reads as a broken card rather than as a card that does
+# not drill down. Every one of these lands on the report the number came from,
+# filtered to the rows it counted.
+
+
+def _report_route(term, status=None):
+	options = {"academic_term": term}
+	if status:
+		options["status"] = status
+	return {"route": ["query-report", "Registration Status"], "route_options": options}
 
 
 @frappe.whitelist()
 def students_registered(filters=None):
-	return {"value": sum(1 for row in _rows() if row["status"] == REGISTERED)}
+	term = term_in_focus()
+	return dict(
+		{"value": sum(1 for row in _rows(term) if row["status"] == REGISTERED)},
+		**_report_route(term, REGISTERED),
+	)
 
 
 @frappe.whitelist()
 def students_still_to_register(filters=None):
 	"""Due to take a block this term and have not registered for it. The one
 	number the window is actually run against."""
-	return {"value": sum(1 for row in _rows() if row["status"] == NOT_REGISTERED)}
+	term = term_in_focus()
+	return dict(
+		{"value": sum(1 for row in _rows(term) if row["status"] == NOT_REGISTERED)},
+		**_report_route(term, NOT_REGISTERED),
+	)
 
 
 @frappe.whitelist()
 def provisional_modules(filters=None):
 	"""Taken on a prerequisite whose result had not landed. They settle
 	themselves when it does, so this is a count to watch, not a queue."""
-	return {"value": sum(row["provisional"] for row in _rows())}
+	term = term_in_focus()
+	return dict(
+		{"value": sum(row["provisional"] for row in _rows(term))},
+		**_report_route(term, REGISTERED),
+	)
 
 
 @frappe.whitelist()
 def modules_needing_review(filters=None):
 	"""The cases the resolution job refused to decide — a prerequisite that
 	failed after the window shut, or after work was recorded against the module.
-	Unlike the rest of these, this one is a queue, and it needs a person."""
-	return {"value": sum(row["needs_review"] for row in _rows())}
+	Unlike the rest of these, this one is a queue, and it needs a person.
+
+	It lands on the same report, which sorts the flagged rows to the top.
+	"""
+	term = term_in_focus()
+	return dict(
+		{"value": sum(row["needs_review"] for row in _rows(term))},
+		**_report_route(term, REGISTERED),
+	)
 
 
 @frappe.whitelist()
 def days_left_to_register(filters=None):
-	"""What decides whether chasing anyone is still worth doing."""
+	"""What decides whether chasing anyone is still worth doing.
+
+	Opens the period itself, since the only thing to do about this number is
+	change the date or close the window early.
+	"""
 	registrar_only()
 	period = period_in_focus()
 	if not period:
 		return {"value": 0}
-	return {"value": max(date_diff(period.last_date_to_register, getdate(nowdate())), 0)}
+	return {
+		"value": max(date_diff(period.last_date_to_register, getdate(nowdate())), 0),
+		"route": ["Form", "Registration Period", period.name],
+	}
 
 
 @frappe.whitelist()
@@ -134,7 +195,9 @@ def consent_forms_signed(filters=None):
 	return {
 		"value": frappe.db.count(
 			"Registration Consent", {"academic_term": term, "docstatus": 1}
-		)
+		),
+		"route": ["List", "Registration Consent"],
+		"route_options": {"academic_term": term, "docstatus": 1},
 	}
 
 
@@ -145,9 +208,9 @@ def empty(name):
 	return {"labels": [], "datasets": [{"name": name, "values": []}]}
 
 
-def progress():
+def progress(filters=None):
 	"""Registered against still to register, for the term in focus."""
-	rows = _rows()
+	rows = _rows(chosen_term(filters))
 	if not rows:
 		return empty(_("Students"))
 
@@ -158,10 +221,10 @@ def progress():
 	}
 
 
-def by_programme():
+def by_programme(filters=None):
 	"""Where the cohort went. A programme far below the others is usually a
 	prerequisite problem rather than a quiet cohort."""
-	rows = _rows()
+	rows = _rows(chosen_term(filters))
 	counted = Counter()
 	for row in rows:
 		for programme in filter(None, (row["programs"] or "").split(", ")):
@@ -177,7 +240,7 @@ def by_programme():
 	}
 
 
-def per_day():
+def per_day(filters=None):
 	"""Registrations by the day they were made, across the whole window.
 
 	Every day in the window is plotted, including the ones nobody registered on.
@@ -192,13 +255,14 @@ def per_day():
 	difference between students who registered and students who were registered.
 	"""
 	registrar_only()
-	period = period_in_focus()
+	term = chosen_term(filters)
+	period = period_for(term)
 	if not period:
 		return empty(_("Registrations"))
 
 	counted = Counter(
 		getdate(row["registered_on"])
-		for row in rows_in_focus(period.academic_term)
+		for row in _rows(term or period.academic_term)
 		if row["registered_on"]
 	)
 

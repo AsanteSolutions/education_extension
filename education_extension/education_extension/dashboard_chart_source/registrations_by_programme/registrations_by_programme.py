@@ -27,4 +27,4 @@ def get(
 	time_interval=None,
 	heatmap_year=None,
 ):
-	return dashboard.by_programme()
+	return dashboard.by_programme(filters)

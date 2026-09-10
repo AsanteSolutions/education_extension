@@ -27,4 +27,4 @@ def get(
 	time_interval=None,
 	heatmap_year=None,
 ):
-	return dashboard.per_day()
+	return dashboard.per_day(filters)

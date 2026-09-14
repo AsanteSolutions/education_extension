@@ -43,6 +43,10 @@ AEGROTAT = "Aegrotat"
 # nothing prompts for the sitting.
 AEGROTAT_PREFIX = re.compile(r"^AEGRO(?:TAT)?[\s_-]*", re.IGNORECASE)
 
+# What a mark that cannot be worked out yet is shown as. A dash rather than a
+# zero, which would read as a mark of nought.
+NO_MARK = "-"
+
 
 def sitting_of(result):
 	"""What a mark counts towards, as (assessment, sitting).
@@ -187,12 +191,57 @@ def _weightage(row):
 	return float(_field(row, "weightage", default=0) or 0)
 
 
+# The lists calculate_course_mark reports and the legacy calculation does not.
+# It answered a narrower question -- the printed report only ever needed the two
+# marks and their completeness flags.
+LEGACY_EMPTY_KEYS = ("missing", "unmarked", "failed_subminima", "unscheduled")
+
+
+def legacy_course_marks(results):
+	"""The legacy calculation, in the shape `calculate_course_mark` returns.
+
+	Two differences are reconciled here rather than at each call site, because
+	the call sites had started reconciling them one at a time and disagreeing:
+	`student_marks` widened the result and `review_rows` did not, so the Course
+	Results report died on any course the fallback was there to serve.
+
+	The weightings read every score as a percentage outright, so a mark out of
+	anything other than 100 is restated before it is handed over. The missing
+	keys are added empty, since an absent key reads as a crash rather than as
+	nothing to report.
+	"""
+	computed = calculate_final_results_detailed([_out_of_a_hundred(row) for row in results])
+
+	for marks in computed.values():
+		marks["scheme"] = None
+		for key in LEGACY_EMPTY_KEYS:
+			marks.setdefault(key, [])
+
+	return computed
+
+
+def _out_of_a_hundred(result):
+	"""A result with its score restated out of 100.
+
+	The scheme calculation divides by the mark's own maximum; the legacy one
+	assumes every mark is already a percentage. A test marked 45 out of 50 is 90,
+	and was reaching the legacy weightings as 45.
+	"""
+	ratio = score_ratio(result)
+	if ratio is None:
+		return result
+
+	return dict(result, total_score=ratio * 100, maximum_score=100)
+
+
 def get_assessment_results(student, academic_term):
 	"""Every mark for a student in a term, grouped by course.
 
-	A course with an approved Course Mark Sheet is read from that sheet, which is
-	the record for the marks it carries. Everything else comes from Assessment
-	Result, so a term captured before the sheets existed still reads correctly.
+	An approved Course Mark Sheet is the record for the marks it carries, which
+	means one course and one sitting. Everything else comes from Assessment
+	Result, so a term captured before the sheets existed still reads correctly,
+	and a course marked that way keeps its main marks once a supplementary sheet
+	is approved alongside them.
 	"""
 	results = frappe.get_all(
 		"Assessment Result",
@@ -215,11 +264,28 @@ def get_assessment_results(student, academic_term):
 	for result in results:
 		by_course.setdefault(result.course, []).append(dict(result))
 
-	# The sheet wins for its own course, wholesale rather than row by row: half a
-	# course's marks from one source and half from another would be nobody's
-	# answer.
-	by_course.update(get_sheet_marks(student, academic_term))
-	return by_course
+	return _merge_sheet_marks(by_course, get_sheet_marks(student, academic_term))
+
+
+def _merge_sheet_marks(stored, from_sheet):
+	"""Let each sheet replace the sittings it covers, and only those.
+
+	A sheet is the record for the marks it carries, but it carries one sitting.
+	Replacing a course's marks wholesale would let a supplementary sheet answer
+	for the main sitting it says nothing about, and the main marks would vanish
+	-- a term marked through Assessment Result would lose its DP and final mark
+	the moment one supplementary sheet was approved.
+
+	Keyed by course or by student depending on the caller; either way a key's
+	rows all belong to one course, which is what makes the sitting the only thing
+	that has to be told apart.
+	"""
+	for key, sheet_rows in from_sheet.items():
+		covered = {sitting_of(row)[1] for row in sheet_rows}
+		kept = [row for row in stored.get(key, []) if sitting_of(row)[1] not in covered]
+		stored[key] = kept + sheet_rows
+
+	return stored
 
 
 # A missed coursework assessment scores nothing, because there is no re-sitting
@@ -306,7 +372,7 @@ def get_course_marks(student, academic_year, academic_term):
 	return marks
 
 
-def student_marks(student, academic_year, academic_term):
+def student_marks(student, academic_year, academic_term, by_course=None):
 	"""The DP and final mark for every course a student has results in.
 
 	The one entry point both the portal and the printed report read. A course
@@ -317,8 +383,13 @@ def student_marks(student, academic_year, academic_term):
 
 	Each course reports `scheme` — the scheme that produced the mark, or None
 	where the legacy calculation did.
+
+	`by_course` is the resolved marks, for a caller that needs them too; it is
+	fetched here when not supplied. The portal passes its own so the term is read
+	once rather than once for the marks and again for the supplementary column.
 	"""
-	by_course = get_assessment_results(student, academic_term)
+	if by_course is None:
+		by_course = get_assessment_results(student, academic_term)
 
 	marks = {}
 	legacy_results = []
@@ -333,12 +404,7 @@ def student_marks(student, academic_year, academic_term):
 			legacy_results.extend(course_results)
 
 	if legacy_results:
-		for course, computed in calculate_final_results_detailed(legacy_results).items():
-			computed["scheme"] = None
-			computed.setdefault("missing", [])
-			computed.setdefault("failed_subminima", [])
-			computed.setdefault("unscheduled", [])
-			marks[course] = computed
+		marks.update(legacy_course_marks(legacy_results))
 
 	return marks
 
@@ -396,7 +462,15 @@ def set_course_remark(student, course, academic_year, academic_term, comment, su
 		"academic_year": academic_year,
 		"academic_term": academic_term,
 	}
-	existing = frappe.get_all(doctype, filters=dict(keys, docstatus=["<", 2]), pluck="name", limit=1)
+	existing = frappe.get_all(
+		doctype,
+		fields=["name", "docstatus"],
+		filters=dict(keys, docstatus=["<", 2]),
+		# A submitted record is the one the reports read, so it is the one to
+		# write to when a draft happens to exist alongside it.
+		order_by="docstatus desc",
+		limit=1,
+	)
 
 	if not existing:
 		if not comment:
@@ -408,8 +482,24 @@ def set_course_remark(student, course, academic_year, academic_term, comment, su
 		record.submit()
 		return record.name
 
-	frappe.db.set_value(doctype, existing[0], fieldname, comment)
-	return existing[0]
+	record = existing[0]
+
+	if record.docstatus == 0:
+		# A draft is invisible to every reader — they all filter on submitted —
+		# so writing to one and reporting success would leave the comment
+		# nowhere, while the sheet went on refusing approval for want of it.
+		# Fill the draft in and file it properly instead.
+		if not comment:
+			# Nothing was ever filed, so there is nothing to clear.
+			return None
+		draft = frappe.get_doc(doctype, record.name)
+		draft.set(fieldname, comment)
+		draft.save()
+		draft.submit()
+		return draft.name
+
+	frappe.db.set_value(doctype, record.name, fieldname, comment)
+	return record.name
 
 
 def get_course_results(course, academic_term):
@@ -438,8 +528,8 @@ def get_course_results(course, academic_term):
 		row["course"] = course
 		by_student.setdefault(result.student, []).append(row)
 
-	# Wholesale per student, for the same reason the by-student version does it:
-	# half a course's marks from each source would be nobody's answer.
+	# Per sitting per student, for the same reason the by-student version does it:
+	# a sheet answers for the sitting it covers and says nothing about the others.
 	from_sheet = {}
 	for row in _sheet_mark_rows(
 		"sheet.course = %(course)s and sheet.academic_term = %(academic_term)s",
@@ -457,8 +547,7 @@ def get_course_results(course, academic_term):
 				"maximum_score": row.maximum_score or 100,
 			}
 		)
-	by_student.update(from_sheet)
-	return by_student
+	return _merge_sheet_marks(by_student, from_sheet)
 
 
 def course_marks(course, academic_year, academic_term):
@@ -516,7 +605,7 @@ def review_rows(course, academic_term, criteria, by_student):
 		computed = (
 			calculate_course_mark(criteria, results)
 			if criteria
-			else calculate_final_results_detailed(results).get(course)
+			else legacy_course_marks(results).get(course)
 		)
 		complete = computed and computed["dp_complete"] and computed["exams_complete"]
 
@@ -525,12 +614,12 @@ def review_rows(course, academic_term, criteria, by_student):
 				"student": student,
 				"student_name": names.get(student, student),
 				"scores": scores,
-				"dp": round_half_up(computed["dp"]) if computed and computed["dp_complete"] else "-",
-				"final_mark": round_half_up(computed["final_mark"]) if complete else "-",
+				"dp": round_half_up(computed["dp"]) if computed and computed["dp_complete"] else NO_MARK,
+				"final_mark": round_half_up(computed["final_mark"]) if complete else NO_MARK,
 				"supplementary": _supplementary_for(results),
 				"remark": comments.get(student, ""),
 				"supp_remark": supp_comments.get(student, ""),
-				"missing": computed["missing"] if computed else [],
+				"missing": (computed or {}).get("missing") or [],
 				"failed_subminima": (computed or {}).get("failed_subminima") or [],
 			}
 		)
@@ -547,7 +636,7 @@ def _supplementary_for(results):
 		ratio = score_ratio(result)
 		if ratio is not None:
 			return round_half_up(ratio * 100)
-	return "-"
+	return NO_MARK
 
 
 def _course_remarks(course, academic_term, doctype, fieldname):
@@ -614,13 +703,16 @@ def get_student_grades(academic_year, academic_term):
 			False, _("Results for {0} have not been published yet.").format(academic_term)
 		)
 
-	marks = student_marks(student, academic_year, academic_term)
+	# Read once and used twice: the marks are worked out from these, and so is the
+	# supplementary column.
+	by_course = get_assessment_results(student, academic_term)
+	marks = student_marks(student, academic_year, academic_term, by_course)
 	comments = _remarks(student, academic_term, "Academic Remark", "remark")
 
 	# The supplementary sitting is released on its own date, so a student can be
 	# looking at their main marks while the supplementary ones are still held.
 	if is_released(academic_year, academic_term, ISSUE_DATE_SUPPLEMENTARY):
-		supplementary = _supplementary_marks(student, academic_term)
+		supplementary = _supplementary_marks(by_course)
 		supplementary_comments = _remarks(
 			student, academic_term, "Supplementary Academic Remark", "supp_remark"
 		)
@@ -636,11 +728,11 @@ def get_student_grades(academic_year, academic_term):
 				# The table keys rows by id; a course appears once per term.
 				"id": course,
 				"course": course,
-				"dp": f"{round_half_up(computed['dp'])}%" if computed["dp_complete"] else "-",
-				"final_mark": f"{round_half_up(computed['final_mark'])}%" if complete else "-",
-				"remark": comments.get(course, "-"),
-				"supp_exam": supplementary.get(course, "-"),
-				"supp_remark": supplementary_comments.get(course, "-"),
+				"dp": f"{round_half_up(computed['dp'])}%" if computed["dp_complete"] else NO_MARK,
+				"final_mark": f"{round_half_up(computed['final_mark'])}%" if complete else NO_MARK,
+				"remark": comments.get(course, NO_MARK),
+				"supp_exam": supplementary.get(course, NO_MARK),
+				"supp_remark": supplementary_comments.get(course, NO_MARK),
 			}
 		)
 
@@ -660,24 +752,21 @@ def _nothing_to_show(released, message):
 	return {"rows": [], "has_supplementary": False, "released": released, "message": message}
 
 
-def _supplementary_marks(student, academic_term):
+def _supplementary_marks(by_course):
 	"""The supplementary exam mark per course, as a percentage. Reported on its
-	own and never folded into the final mark."""
-	rows = frappe.get_all(
-		"Assessment Result",
-		fields=["course", "assessment_group", "custom_sitting as sitting", "total_score", "maximum_score"],
-		filters={"student": student, "academic_term": academic_term, "docstatus": 1},
-		# Either the sitting says so, or the group is named the way it was said
-		# before the sitting existed.
-		or_filters={"custom_sitting": SUPPLEMENTARY, "assessment_group": SUPP_GROUP},
-		limit_page_length=0,
-	)
+	own and never folded into the final mark.
 
+	Read from the resolved marks through the same helper the staff side uses.
+	Querying Assessment Result directly, as this once did, could not see a
+	supplementary captured on an approved Course Mark Sheet — so a student was
+	shown a dash for a re-sit the Course Results report showed a mark for.
+	"""
 	marks = {}
-	for row in rows:
-		ratio = score_ratio(dict(row))
-		if ratio is not None:
-			marks[row.course] = f"{round_half_up(ratio * 100)}%"
+	for course, results in by_course.items():
+		mark = _supplementary_for(results)
+		if mark != NO_MARK:
+			marks[course] = f"{mark}%"
+
 	return marks
 
 
@@ -695,7 +784,7 @@ def _remarks(student, academic_term, doctype, fieldname):
 
 def format_mark(mark, complete):
 	"""The report's convention: a whole percentage, or a dash when incomplete."""
-	return round_half_up(mark) if complete else "-"
+	return round_half_up(mark) if complete else NO_MARK
 
 
 # ---------------------------------------------------------------------------

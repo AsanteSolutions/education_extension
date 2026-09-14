@@ -653,16 +653,24 @@ class CourseMarkSheet(Document):
 	# -- moderation ----------------------------------------------------------
 
 	@frappe.whitelist()
-	def apply_moderation(self, method, value, reason):
+	def apply_moderation(self, moderation_method, value, reason):
 		"""Adjust the cohort, leaving every raw score untouched.
 
 		Recorded on the sheet — method, value, reason and author — so the Head
 		approves the adjustment along with the marks.
+
+		The first argument is deliberately not called `method`. Frappe dispatches
+		a whitelisted document method as `doc.run_method(method, **args)`, so a
+		parameter of that name collides with `run_method`'s own and the call dies
+		with a TypeError before this body runs. The dialog field is named to
+		match, and both have to stay that way.
 		"""
 		if self.workflow_state not in (CHECKED, MODERATED):
 			frappe.throw(_("Moderation belongs between checking and approval."))
-		if method not in (MODERATION_LINEAR, MODERATION_FLAT):
-			frappe.throw(_("{0} is not a moderation method.").format(frappe.bold(method)))
+		if moderation_method not in (MODERATION_LINEAR, MODERATION_FLAT):
+			frappe.throw(
+				_("{0} is not a moderation method.").format(frappe.bold(moderation_method))
+			)
 		if not reason:
 			frappe.throw(_("Moderation needs a reason."))
 
@@ -671,10 +679,10 @@ class CourseMarkSheet(Document):
 			if entry.status != MARKED:
 				continue
 			entry.moderated_score = moderated_value(
-				entry.raw_score, entry.maximum_score or 100, method, value
+				entry.raw_score, entry.maximum_score or 100, moderation_method, value
 			)
 
-		self.moderation_method = method
+		self.moderation_method = moderation_method
 		self.moderation_value = value
 		self.moderation_reason = reason
 		self.moderated_by = frappe.session.user

@@ -1,6 +1,8 @@
 # Copyright (c) 2026, Asante Solutions and contributors
 # For license information, please see license.txt
 
+import unittest
+
 from frappe.tests.utils import FrappeTestCase
 
 from education_extension.education_extension.doctype.course_mark_scheme.course_mark_scheme import (
@@ -12,8 +14,14 @@ from education_extension.education_extension.doctype.student_progress_report.stu
 	calculate_final_results,
 )
 from education_extension.education_extension.marking import (
+	LEGACY_EMPTY_KEYS,
+	MAIN,
+	SUPPLEMENTARY,
+	_merge_sheet_marks,
+	_supplementary_marks,
 	calculate_course_mark,
 	format_mark,
+	legacy_course_marks,
 	remark_codes,
 	resolve_results,
 	sitting_of,
@@ -280,3 +288,113 @@ class TestMarking(FrappeTestCase):
 			remark_codes("Academic Remark"),
 			remark_codes("Supplementary Academic Remark"),
 		)
+
+
+class TestSheetsAndSittings(FrappeTestCase):
+	"""A sheet answers for the sitting it covers, and only that one."""
+
+	def stored(self, **sittings):
+		"""One course of Assessment Result rows, a Theory Exam per sitting."""
+		return {
+			"ANH1201 - Anatomy": [
+				{
+					"course": "ANH1201 - Anatomy",
+					"assessment_group": "Theory Exam",
+					"sitting": sitting,
+					"total_score": score,
+					"maximum_score": 100,
+				}
+				for sitting, score in sittings.items()
+			]
+		}
+
+	def sheet(self, sitting, score):
+		return {
+			"ANH1201 - Anatomy": [
+				{
+					"course": "ANH1201 - Anatomy",
+					"assessment_group": "Theory Exam",
+					"sitting": sitting,
+					"total_score": score,
+					"maximum_score": 100,
+				}
+			]
+		}
+
+	def test_a_supplementary_sheet_leaves_the_main_marks_alone(self):
+		"""The one that was wrong: a term marked through Assessment Result lost
+		its DP and final mark the moment one supplementary sheet was approved."""
+		merged = _merge_sheet_marks(self.stored(Main=55), self.sheet(SUPPLEMENTARY, 62))
+
+		rows = merged["ANH1201 - Anatomy"]
+		by_sitting = {row["sitting"]: row["total_score"] for row in rows}
+		self.assertEqual(by_sitting[MAIN], 55, "the main mark was displaced")
+		self.assertEqual(by_sitting[SUPPLEMENTARY], 62)
+
+	def test_a_sheet_replaces_the_sitting_it_covers(self):
+		"""It is still the record for its own sitting, so the stored row goes."""
+		merged = _merge_sheet_marks(self.stored(Main=55), self.sheet(MAIN, 71))
+
+		rows = merged["ANH1201 - Anatomy"]
+		self.assertEqual([row["total_score"] for row in rows], [71])
+
+	def test_a_course_with_no_sheet_is_untouched(self):
+		stored = self.stored(Main=55)
+		self.assertEqual(_merge_sheet_marks(stored, {}), stored)
+
+	def test_the_student_sees_a_supplementary_held_on_a_sheet(self):
+		"""Read through the same resolution as the staff side. Querying
+		Assessment Result directly could not see a sheet, so the student was
+		shown a dash for a re-sit the report showed a mark for."""
+		merged = _merge_sheet_marks(self.stored(Main=40), self.sheet(SUPPLEMENTARY, 62))
+		self.assertEqual(_supplementary_marks(merged), {"ANH1201 - Anatomy": "62%"})
+
+	def test_no_supplementary_means_no_entry(self):
+		self.assertEqual(_supplementary_marks(self.stored(Main=55)), {})
+
+
+class TestLegacyFallbackShape(FrappeTestCase):
+	"""The fallback has to answer in the same shape as the scheme calculation,
+	because the same readers read both."""
+
+	COURSE = "ANH1201 - Anatomy"
+
+	def results(self, score, maximum):
+		return [
+			{
+				"course": self.COURSE,
+				"assessment_group": "Test 1",
+				"sitting": MAIN,
+				"total_score": score,
+				"maximum_score": maximum,
+			}
+		]
+
+	def test_it_reports_the_lists_the_scheme_calculation_reports(self):
+		"""review_rows subscripted `missing` and the legacy result had no such
+		key, so the Course Results report died on exactly the courses the
+		fallback exists to serve."""
+		computed = legacy_course_marks(self.results(45, 100))[self.COURSE]
+		for key in LEGACY_EMPTY_KEYS:
+			self.assertIn(key, computed)
+		self.assertIsNone(computed["scheme"])
+
+	def test_a_mark_out_of_fifty_is_read_as_a_percentage(self):
+		"""45 out of 50 is 90, and was reaching the legacy weightings as 45."""
+		out_of_fifty = legacy_course_marks(self.results(45, 50))[self.COURSE]
+		out_of_a_hundred = legacy_course_marks(self.results(90, 100))[self.COURSE]
+		self.assertEqual(out_of_fifty["dp"], out_of_a_hundred["dp"])
+
+	def test_an_unmarked_result_survives_the_restatement(self):
+		computed = legacy_course_marks(self.results(None, 100))[self.COURSE]
+		self.assertEqual(computed["dp"], 0.0)
+		self.assertFalse(computed["dp_complete"])
+
+
+def run_tests(verbosity=2):
+	"""Run these from a console, since bench run-tests cannot bootstrap this site."""
+	suite = unittest.TestSuite()
+	loader = unittest.TestLoader()
+	for case in (TestMarking, TestSheetsAndSittings, TestLegacyFallbackShape):
+		suite.addTests(loader.loadTestsFromTestCase(case))
+	return unittest.TextTestRunner(verbosity=verbosity).run(suite)

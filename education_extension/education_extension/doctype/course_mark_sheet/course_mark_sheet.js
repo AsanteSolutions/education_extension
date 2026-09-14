@@ -62,7 +62,10 @@ function moderate(frm) {
 		title: __('Moderate Marks'),
 		fields: [
 			{
-				fieldname: 'method',
+				// Named to match the server parameter, which cannot be called
+				// `method` -- that collides with run_method's own argument and
+				// the call fails before it reaches the controller.
+				fieldname: 'moderation_method',
 				fieldtype: 'Select',
 				label: __('Method'),
 				options: ['Linear Scale', 'Flat Adjustment'],

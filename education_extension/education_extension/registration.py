@@ -462,12 +462,22 @@ def _row(course, course_block, block, history, already, rules, alongside, strict
 	elif blocking:
 		status = BLOCKED
 		reason = _("Not yet passed: {0}.").format(", ".join(_codes(blocking)))
+	elif course_block < block:
+		# Tested before `outstanding`, because a carry-over stays the student's
+		# choice whether or not one of its prerequisites is still pending. The
+		# other order made it PROVISIONAL, and PROVISIONAL is mandatory -- so a
+		# module the student was free to decline became compulsory because a
+		# supplementary result had not landed. It is still registered
+		# provisionally; that is `provisional_on` below, not the status.
+		status = CARRIED_OVER
+		reason = _("Carried over from {0}.").format(_semester_label(course_block))
+		if outstanding:
+			reason += " " + _("Provisional: {0} has no final result yet.").format(
+				", ".join(_codes(outstanding))
+			)
 	elif outstanding:
 		status = PROVISIONAL
 		reason = _("Provisional: {0} has no final result yet.").format(", ".join(_codes(outstanding)))
-	elif course_block < block:
-		status = CARRIED_OVER
-		reason = _("Carried over from {0}.").format(_semester_label(course_block))
 	else:
 		status, reason = REQUIRED, None
 
@@ -646,6 +656,8 @@ def register_student(student, courses, agreed=None, signatures=None):
 			)
 		)
 
+	_validate_corequisites(student, chosen, rows)
+
 	programs = programs_by_block()
 	grouped = {}
 	for course in chosen:
@@ -665,6 +677,48 @@ def register_student(student, courses, agreed=None, signatures=None):
 	]
 
 	return {"enrollments": created, "courses": chosen, "consent": consent}
+
+
+def unmet_corequisites(chosen, taking, history, rules):
+	"""Co-requisites of the chosen modules that are not being taken, as pairs.
+
+	Pure, so the rule can be checked without a site.
+	"""
+	unmet = []
+	for course in chosen:
+		for other, kind in rules.get(course, ()):
+			if kind != COREQUISITE:
+				continue
+			if other in taking or history.get(other, NEVER) == PASSED:
+				continue
+			unmet.append((course, other))
+
+	return unmet
+
+
+def _validate_corequisites(student, chosen, rows):
+	"""A co-requisite has to be among the modules actually taken.
+
+	`options_for` judges co-requisites against everything *offered*, which is
+	right for deciding whether a module can be shown as selectable — at that
+	point nothing has been chosen yet. It is not enough at submission: a
+	co-requisite offered as a carry-over is the student's to decline, so the
+	module depending on it could be kept while the module satisfying it was
+	unticked, and nothing looked again.
+	"""
+	# Already on a submitted enrolment for this term counts as taken alongside.
+	taking = set(chosen) | {c for c, row in rows.items() if row["status"] == REGISTERED}
+	unmet = unmet_corequisites(chosen, taking, academic_history(student), prerequisite_rules())
+
+	if unmet:
+		frappe.throw(
+			_("These modules must be taken alongside another you have not chosen: {0}.").format(
+				"; ".join(
+					_("{0} needs {1}").format(_codes([course])[0], _codes([other])[0])
+					for course, other in unmet
+				)
+			)
+		)
 
 
 def _record_consent(student, period, agreed, signatures):
@@ -734,7 +788,11 @@ def _create_enrollment(student, program, courses, rows, period):
 			"courses",
 			{
 				"course": course,
-				"custom_provisional": 1 if row["status"] == PROVISIONAL else 0,
+				# From what it is waiting on rather than from the status. A
+				# carry-over can be waiting on a result too, and reading the
+				# status would leave that one unflagged and never revisited when
+				# the result landed.
+				"custom_provisional": 1 if row["provisional_on"] else 0,
 				"custom_provisional_on": ", ".join(row["provisional_on"]) or None,
 			},
 		)

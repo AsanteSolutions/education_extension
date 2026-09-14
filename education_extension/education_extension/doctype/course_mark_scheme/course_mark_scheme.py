@@ -4,6 +4,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.utils import sbool
 
 from education_extension.education_extension.doctype.student_progress_report.student_progress_report import (
 	NO_ORAL_EXAM,
@@ -182,6 +183,11 @@ def generate_legacy_schemes(academic_year, courses=None, submit=False):
 	"""
 	frappe.only_for(("Academics User", "Education Manager", "System Manager"))
 
+	# Whitelisted, so both arrive as strings over HTTP -- and a non-empty string
+	# is truthy, which made `submit=false` submit every scheme it had just built.
+	# Submitting is what makes a scheme authoritative and there is no way back
+	# from it but cancelling each one, so the flag is read rather than assumed.
+	submit = sbool(submit)
 	if isinstance(courses, str):
 		courses = frappe.parse_json(courses)
 	if not courses:

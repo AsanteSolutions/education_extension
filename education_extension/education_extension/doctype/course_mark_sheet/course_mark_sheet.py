@@ -32,6 +32,13 @@ RELEASED = "Released"
 # checking step.
 ENTRY_STATES = (AWAITING_ENTRY, IN_ENTRY)
 
+# Who may adjust a cohort. The workflow names a role per state, but `allow_edit`
+# is enforced in the browser and nowhere else — Frappe's own workflow validation
+# checks transitions, never the editing role — so it decorates the form without
+# guarding the endpoint. An Instructor holds write on this doctype, which is all
+# `run_doc_method` asks for.
+MODERATION_ROLES = ("Academics User", "Education Manager", "System Manager")
+
 # Moderation adjusts a cohort after checking. The raw score is never overwritten.
 MODERATION_NONE = "None"
 MODERATION_LINEAR = "Linear Scale"
@@ -98,9 +105,33 @@ class CourseMarkSheet(Document):
 		"""Submission is the approval step. From here the sheet is the record of
 		these marks — the calculation reads it in preference to any Assessment
 		Result for the same course."""
+		self.validate_it_came_through_the_workflow()
 		self.validate_every_mark_accounted_for()
 		self.validate_every_student_has_a_comment()
 		self.approved_by = frappe.session.user
+
+	def validate_it_came_through_the_workflow(self):
+		"""Refuse a submit that did not arrive by way of the Approve action.
+
+		Frappe validates a workflow *transition*, not a state: a plain submit
+		leaves the state field untouched, so nothing is compared and nothing
+		objects. Worse, Frappe then relabels the document to whichever state
+		carries docstatus 1 — so a sheet submitted straight from entry ends up
+		reading "Approved" with checking and moderation never done, and no trace
+		that they were skipped.
+
+		This runs before the state field is touched, so on the proper path it
+		already reads Approved and on a bare submit it still reads whatever the
+		sheet was.
+		"""
+		if self.workflow_state in (APPROVED, RELEASED):
+			return
+
+		frappe.throw(
+			_(
+				"This sheet is {0} and cannot be submitted directly. Approve it through the workflow, so that checking and moderation are not skipped."
+			).format(frappe.bold(self.workflow_state))
+		)
 
 	def validate_scheme(self):
 		if self.mark_scheme:
@@ -192,6 +223,38 @@ class CourseMarkSheet(Document):
 				_("The marks cannot be changed while the sheet is {0}. Return it for correction first.").format(
 					frappe.bold(self.workflow_state)
 				)
+			)
+
+		self.validate_moderation_came_from_the_moderation_step()
+
+	def validate_moderation_came_from_the_moderation_step(self):
+		"""The adjusted score is a mark too, and it was outside the check above.
+
+		`apply_moderation` and `clear_moderation` set the flag before saving, so
+		this only refuses a moderated score edited some other way — a field
+		written straight onto the document, which needs no more than the write
+		permission an Instructor already holds.
+		"""
+		if self.flags.moderating:
+			return
+
+		previous = self.get_doc_before_save()
+		if not previous:
+			return
+
+		def moderation(doc):
+			return (
+				doc.moderation_method,
+				doc.moderation_value,
+				{
+					(entry.student, entry.assessment_group): entry.moderated_score
+					for entry in doc.entries
+				},
+			)
+
+		if moderation(self) != moderation(previous):
+			frappe.throw(
+				_("Moderation is recorded through Moderate Marks, so that what was done and why is approved along with the marks.")
 			)
 
 	def validate_every_mark_accounted_for(self):
@@ -665,6 +728,7 @@ class CourseMarkSheet(Document):
 		with a TypeError before this body runs. The dialog field is named to
 		match, and both have to stay that way.
 		"""
+		frappe.only_for(MODERATION_ROLES)
 		if self.workflow_state not in (CHECKED, MODERATED):
 			frappe.throw(_("Moderation belongs between checking and approval."))
 		if moderation_method not in (MODERATION_LINEAR, MODERATION_FLAT):
@@ -687,12 +751,14 @@ class CourseMarkSheet(Document):
 		self.moderation_reason = reason
 		self.moderated_by = frappe.session.user
 		self.moderated_on = now_datetime()
+		self.flags.moderating = True
 		self.save()
 		return self.moderation_summary()
 
 	@frappe.whitelist()
 	def clear_moderation(self):
 		"""Put the raw marks back."""
+		frappe.only_for(MODERATION_ROLES)
 		if self.workflow_state not in (CHECKED, MODERATED):
 			frappe.throw(_("Moderation can only be cleared before approval."))
 
@@ -703,6 +769,7 @@ class CourseMarkSheet(Document):
 		self.moderation_reason = None
 		self.moderated_by = None
 		self.moderated_on = None
+		self.flags.moderating = True
 		self.save()
 
 	def moderation_summary(self):

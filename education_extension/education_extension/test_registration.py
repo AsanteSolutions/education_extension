@@ -1115,6 +1115,92 @@ class TestRegistrationPeriod(IntegrationTestCase):
 			).insert()
 
 
+
+class TestCarryOversStayOptional(UnitTestCase):
+	"""A carry-over is the student's to decline, pending prerequisite or not."""
+
+	PREREQ = "ANH1101 - Foundations"
+	COURSE = "ANH1201 - Anatomy"
+
+	def row(self, course_block, block, prereq_outcome):
+		history = {self.PREREQ: prereq_outcome}
+		rules = {self.COURSE: [(self.PREREQ, reg.PREREQUISITE)]}
+		return reg._row(self.COURSE, course_block, block, history, set(), rules, set())
+
+	def test_a_carry_over_awaiting_a_result_is_still_a_carry_over(self):
+		"""The one that was wrong: the provisional branch was tested first, and
+		provisional is mandatory, so the student could not untick it."""
+		row = self.row(course_block=2, block=4, prereq_outcome=reg.PENDING)
+
+		self.assertEqual(row["status"], reg.CARRIED_OVER)
+		self.assertNotIn(row["status"], reg.MANDATORY)
+		self.assertTrue(row["selectable"])
+
+	def test_it_is_still_registered_provisionally(self):
+		"""Only the status changed. What it waits on is recorded either way, so
+		the resolution job still revisits it when the result lands."""
+		row = self.row(course_block=2, block=4, prereq_outcome=reg.PENDING)
+		self.assertEqual(row["provisional_on"], ["ANH1101"])
+
+	def test_the_students_own_block_is_still_mandatory(self):
+		"""The control: a module of this semester awaiting a result stays
+		provisional, and provisional stays compulsory."""
+		row = self.row(course_block=4, block=4, prereq_outcome=reg.PENDING)
+
+		self.assertEqual(row["status"], reg.PROVISIONAL)
+		self.assertIn(row["status"], reg.MANDATORY)
+
+	def test_a_plain_carry_over_is_unchanged(self):
+		"""Nothing outstanding and nothing blocking, so it was already right."""
+		row = self.row(course_block=2, block=4, prereq_outcome=reg.PASSED)
+
+		self.assertEqual(row["status"], reg.CARRIED_OVER)
+		self.assertEqual(row["provisional_on"], [])
+
+	def test_a_failed_prerequisite_still_blocks(self):
+		"""Reordering the branches must not reach past the blocking check."""
+		row = self.row(course_block=2, block=4, prereq_outcome=reg.FAILED)
+
+		self.assertEqual(row["status"], reg.BLOCKED)
+		self.assertFalse(row["selectable"])
+
+
+class TestCorequisitesAtSubmission(UnitTestCase):
+	"""Judged against what is actually being taken, not what was offered."""
+
+	COURSE = "ANH1205 - Herd Health"
+	PARTNER = "ANH1204 - Physiology"
+
+	@property
+	def rules(self):
+		return {self.COURSE: [(self.PARTNER, reg.COREQUISITE)]}
+
+	def test_a_deselected_corequisite_is_refused(self):
+		"""options_for judges these against everything offered, which is right
+		while nothing has been chosen. At submission it is not: the partner was
+		an optional carry-over and could be unticked after the check passed."""
+		unmet = reg.unmet_corequisites([self.COURSE], {self.COURSE}, {}, self.rules)
+		self.assertEqual(unmet, [(self.COURSE, self.PARTNER)])
+
+	def test_taking_both_is_allowed(self):
+		unmet = reg.unmet_corequisites(
+			[self.COURSE, self.PARTNER], {self.COURSE, self.PARTNER}, {}, self.rules
+		)
+		self.assertEqual(unmet, [])
+
+	def test_having_passed_it_is_allowed(self):
+		unmet = reg.unmet_corequisites(
+			[self.COURSE], {self.COURSE}, {self.PARTNER: reg.PASSED}, self.rules
+		)
+		self.assertEqual(unmet, [])
+
+	def test_a_prerequisite_is_not_a_corequisite(self):
+		"""Only co-requisites are judged here; prerequisites were already
+		settled by the eligibility check."""
+		rules = {self.COURSE: [(self.PARTNER, reg.PREREQUISITE)]}
+		self.assertEqual(reg.unmet_corequisites([self.COURSE], {self.COURSE}, {}, rules), [])
+
+
 def run_tests(verbosity=2):
 	"""Run these from a console, since bench run-tests cannot bootstrap this site."""
 	suite = unittest.TestSuite()
@@ -1124,6 +1210,8 @@ def run_tests(verbosity=2):
 		TestPrerequisiteGraph,
 		TestRegistrationFlow,
 		TestRegistrationPeriod,
+		TestCarryOversStayOptional,
+		TestCorequisitesAtSubmission,
 	):
 		suite.addTests(loader.loadTestsFromTestCase(case))
 	return unittest.TextTestRunner(verbosity=verbosity).run(suite)

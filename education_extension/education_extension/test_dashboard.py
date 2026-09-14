@@ -314,11 +314,30 @@ class TestDashboardPermissions(IntegrationTestCase):
 		"consent_forms_signed",
 	)
 
+	def test_the_numbers_answer_to_the_reports_own_roles(self):
+		"""Every one of these is the Registration Status report counted up, so
+		the two have to admit the same people. Gating the dashboard on the wider
+		set that decides whether to show the app tile handed an Instructor,
+		through the cards, the cohort list the report refuses them."""
+		import json
+		import os
+
+		path = os.path.join(
+			os.path.dirname(__file__),
+			"report",
+			"registration_status",
+			"registration_status.json",
+		)
+		with open(path) as handle:
+			granted = {row["role"] for row in json.load(handle)["roles"]}
+
+		self.assertEqual(set(dashboard.REGISTRAR_ROLES), granted)
+
 	def test_a_student_cannot_read_the_cohort_numbers(self):
 		user = frappe.db.get_value("Student", {"user": ("is", "set")}, "user")
 		if not user:
 			self.skipTest("no student with a portal user on this site")
-		if dashboard.STAFF_ROLES & set(frappe.get_roles(user)):
+		if set(dashboard.REGISTRAR_ROLES) & set(frappe.get_roles(user)):
 			self.skipTest("this student also holds a staff role")
 
 		frappe.set_user(user)

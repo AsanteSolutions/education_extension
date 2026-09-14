@@ -10,7 +10,14 @@ from education_extension.education_extension.doctype.course_mark_sheet.course_ma
 	ABSENT,
 	AEGROTAT,
 	AEGROTAT_COMMENT,
+	APPROVED,
+	AWAITING_ENTRY,
+	CHECKED,
 	COURSEWORK,
+	IN_ENTRY,
+	MODERATED,
+	RELEASED,
+	SUBMITTED_FOR_CHECKING,
 	SUPPLEMENTARY_COMMENT,
 	SUPPLEMENTARY_GROUP,
 	MARKED,
@@ -197,3 +204,61 @@ class TestCourseMarkSheet(FrappeTestCase):
 
 		with self.assertRaises(frappe.ValidationError):
 			doc.validate_every_student_has_a_comment()
+
+
+class TestApprovalCannotBeSkipped(FrappeTestCase):
+	"""Submission is the approval step, so it has to have come from one."""
+
+	def sheet_in(self, state):
+		doc = sheet_with([("S1", "Test 1", MARKED, 60, 0)])
+		doc.workflow_state = state
+		return doc
+
+	def test_a_bare_submit_is_refused(self):
+		"""Frappe validates a workflow transition, not a state: a plain submit
+		changes no state field, so nothing is compared and nothing objects. It
+		then relabels the document to whichever state carries docstatus 1, so
+		the sheet ends up reading Approved with checking never done."""
+		for state in (AWAITING_ENTRY, IN_ENTRY, SUBMITTED_FOR_CHECKING, CHECKED, MODERATED):
+			with self.subTest(state=state):
+				with self.assertRaises(frappe.ValidationError):
+					self.sheet_in(state).validate_it_came_through_the_workflow()
+
+	def test_the_approve_action_is_allowed(self):
+		"""It sets the state before saving, so by here it already reads Approved."""
+		for state in (APPROVED, RELEASED):
+			with self.subTest(state=state):
+				self.sheet_in(state).validate_it_came_through_the_workflow()
+
+
+class TestModerationIsNotEditable(FrappeTestCase):
+	"""The adjusted score is a mark too, and it sat outside the marks check."""
+
+	def pair(self, moderated_now, moderated_before):
+		doc = sheet_with([("S1", "Test 1", MARKED, 60, moderated_now)], MODERATION_FLAT)
+		previous = sheet_with([("S1", "Test 1", MARKED, 60, moderated_before)], MODERATION_FLAT)
+		doc.workflow_state = CHECKED
+		return doc, previous
+
+	def test_an_edited_moderated_score_is_refused(self):
+		"""Writing the field straight onto the document needs no more than the
+		write permission an Instructor already holds."""
+		doc, previous = self.pair(moderated_now=90, moderated_before=66)
+
+		with patch.object(type(doc), "get_doc_before_save", return_value=previous):
+			with self.assertRaises(frappe.ValidationError):
+				doc.validate_moderation_came_from_the_moderation_step()
+
+	def test_the_moderation_step_itself_is_allowed(self):
+		"""apply_moderation and clear_moderation set the flag before saving."""
+		doc, previous = self.pair(moderated_now=90, moderated_before=66)
+		doc.flags.moderating = True
+
+		with patch.object(type(doc), "get_doc_before_save", return_value=previous):
+			doc.validate_moderation_came_from_the_moderation_step()
+
+	def test_an_unchanged_sheet_passes(self):
+		doc, previous = self.pair(moderated_now=66, moderated_before=66)
+
+		with patch.object(type(doc), "get_doc_before_save", return_value=previous):
+			doc.validate_moderation_came_from_the_moderation_step()

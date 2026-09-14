@@ -26,7 +26,6 @@ from frappe import _
 from frappe.utils import date_diff, getdate, nowdate
 from frappe.utils.caching import request_cache
 
-from education_extension.education_extension.desk import STAFF_ROLES
 from education_extension.education_extension.doctype.registration_period.registration_period import (
 	next_period,
 	open_period,
@@ -73,8 +72,16 @@ def rows_in_focus(term):
 	return status_rows(frappe._dict({"academic_term": term}))
 
 
+# Who may see cohort-wide registration figures. Deliberately the Registration
+# Status report's own roles, not the wider set that decides whether to show the
+# app tile: these numbers are that report counted up, and reading them off a
+# longer list would hand out through the dashboard exactly what the report
+# refuses. Held to the report's list by a test, since the two live apart.
+REGISTRAR_ROLES = ("Academics User", "Education Manager", "System Manager")
+
+
 def registrar_only():
-	frappe.only_for(tuple(sorted(STAFF_ROLES)))
+	frappe.only_for(REGISTRAR_ROLES)
 
 
 def chosen_term(filters=None):

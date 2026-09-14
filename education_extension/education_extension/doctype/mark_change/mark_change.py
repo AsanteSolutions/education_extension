@@ -17,7 +17,7 @@ from.
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import now_datetime
+from frappe.utils import flt, now_datetime
 
 from education_extension.education_extension.doctype.course_mark_sheet.course_mark_sheet import (
 	MARKED,
@@ -113,10 +113,56 @@ class MarkChange(Document):
 		if doctype == "Course Mark Sheet Entry":
 			self._apply_to_sheet_entry(name, sheet)
 		else:
-			frappe.db.set_value("Assessment Result", name, "total_score", self.new_score)
-			frappe.get_doc("Assessment Result", name).add_comment(
-				"Comment", self._note()
+			self._apply_to_assessment_result(name)
+
+	def _apply_to_assessment_result(self, name):
+		"""Write the corrected score, and everything Assessment Result derives
+		from it.
+
+		`grade` and the `details` rows are normally recomputed by
+		`AssessmentResult.validate`, which cannot run here: the document is
+		submitted and no field on it allows editing after submission, so the
+		write has to go around the controller. Setting the score alone left the
+		record contradicting itself — a pass mark beside a fail grade, and a
+		breakdown still summing to the old total.
+		"""
+		from education.education.api import get_grade
+
+		result = frappe.get_doc("Assessment Result", name)
+		maximum = result.maximum_score or 100
+		grade = get_grade(result.grading_scale, (flt(self.new_score) / maximum) * 100)
+
+		frappe.db.set_value(
+			"Assessment Result", name, {"total_score": self.new_score, "grade": grade}
+		)
+
+		# The breakdown is per criterion and this change names an assessment, so
+		# it can only be attributed when there is one row to attribute it to.
+		# Where there is more than one, the rows are left alone and the note says
+		# so rather than the sums quietly disagreeing with no record of why.
+		reconciled = len(result.details) == 1
+		if reconciled:
+			row = result.details[0]
+			row_maximum = row.maximum_score or maximum
+			frappe.db.set_value(
+				"Assessment Result Detail",
+				row.name,
+				{
+					"score": self.new_score,
+					"grade": get_grade(
+						result.grading_scale, (flt(self.new_score) / row_maximum) * 100
+					),
+				},
+				update_modified=False,
 			)
+
+		note = self._note()
+		if not reconciled and result.details:
+			note += " " + _(
+				"The per-criterion breakdown was left as it was, since this change names an assessment rather than one of its {0} criteria."
+			).format(len(result.details))
+
+		result.add_comment("Comment", note)
 
 	def _apply_to_sheet_entry(self, name, sheet_name):
 		sheet = frappe.get_doc("Course Mark Sheet", sheet_name)

@@ -14,6 +14,7 @@ from education_extension.education_extension.doctype.student_progress_report.stu
 	calculate_final_results,
 )
 from education_extension.education_extension.marking import (
+	AEGROTAT,
 	LEGACY_EMPTY_KEYS,
 	MAIN,
 	SUPPLEMENTARY,
@@ -391,10 +392,40 @@ class TestLegacyFallbackShape(FrappeTestCase):
 		self.assertFalse(computed["dp_complete"])
 
 
+
+class TestEverySittingCanBeReleased(FrappeTestCase):
+	"""Publication is decided per sitting, so every sitting needs a kind of
+	issue date to be published under — otherwise marks for it are recorded, and
+	then held back forever by a release that has nowhere to be recorded."""
+
+	def test_the_backfill_knows_every_sitting(self):
+		from education_extension.patches.release_historical_progress_reports import (
+			KIND_FOR_SITTING,
+		)
+
+		for sitting in (MAIN, SUPPLEMENTARY, AEGROTAT):
+			with self.subTest(sitting=sitting):
+				self.assertIn(sitting, KIND_FOR_SITTING)
+
+	def test_a_result_from_before_the_sitting_field_counts_as_main(self):
+		"""Those rows hold NULL, and they are ordinary marks."""
+		from education_extension.patches.release_historical_progress_reports import (
+			KIND_FOR_SITTING,
+		)
+
+		self.assertEqual(KIND_FOR_SITTING[None], KIND_FOR_SITTING[MAIN])
+		self.assertEqual(KIND_FOR_SITTING[""], KIND_FOR_SITTING[MAIN])
+
+
 def run_tests(verbosity=2):
 	"""Run these from a console, since bench run-tests cannot bootstrap this site."""
 	suite = unittest.TestSuite()
 	loader = unittest.TestLoader()
-	for case in (TestMarking, TestSheetsAndSittings, TestLegacyFallbackShape):
+	for case in (
+		TestMarking,
+		TestSheetsAndSittings,
+		TestLegacyFallbackShape,
+		TestEverySittingCanBeReleased,
+	):
 		suite.addTests(loader.loadTestsFromTestCase(case))
 	return unittest.TextTestRunner(verbosity=verbosity).run(suite)

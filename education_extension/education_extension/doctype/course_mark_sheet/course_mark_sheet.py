@@ -906,9 +906,17 @@ def generate_sheets(academic_year, academic_term, sitting="Main", courses=None):
 			}
 		)
 		try:
+			# Behind a savepoint, because `frappe.throw` unwinds the call but not
+			# the writes already made. Without it a course whose entries would not
+			# generate left its empty sheet behind, committed — and the skip check
+			# above then matched that sheet on every later run, so the course could
+			# never be generated again and was reported as skipped rather than as
+			# the problem it was.
+			frappe.db.savepoint("generate_sheet")
 			sheet.insert()
 			sheet.generate_entries()
 		except frappe.ValidationError as error:
+			frappe.db.rollback(save_point="generate_sheet")
 			problems.append({"course": course, "reason": str(error)})
 			continue
 

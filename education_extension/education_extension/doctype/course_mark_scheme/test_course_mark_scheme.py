@@ -9,6 +9,7 @@ from education_extension.education_extension.doctype.course_mark_scheme.course_m
 	EXAMINATION,
 	legacy_criteria_for_course,
 )
+from education_extension.education_extension.testing import needs_doctype
 
 # One course per shape the marking rules recognise, with the number of
 # assessments each is marked on.
@@ -72,6 +73,7 @@ class TestCourseMarkScheme(FrappeTestCase):
 
 	def _draft(self, criteria):
 		"""A scheme against whatever course and year the site happens to have."""
+		needs_doctype(self, "Course", "Academic Year")
 		course = frappe.get_all("Course", pluck="name", limit=1)
 		academic_year = frappe.get_all("Academic Year", pluck="name", limit=1)
 		if not course or not academic_year:

@@ -12,6 +12,7 @@ from education_extension.education_extension.doctype.marking_settings.marking_se
 	get_student_order,
 	order_students,
 )
+from education_extension.education_extension.testing import needs_doctype
 
 
 class TestMarkingSettings(FrappeTestCase):
@@ -20,6 +21,7 @@ class TestMarkingSettings(FrappeTestCase):
 		options = frappe.get_meta("Marking Settings").get_field("student_order").options.split("\n")
 		self.assertEqual(set(options), set(SORT_FIELD))
 
+		needs_doctype(self, "Student")
 		student_fields = {df.fieldname for df in frappe.get_meta("Student").fields}
 		student_fields.add("name")
 		for option, fieldname in SORT_FIELD.items():
@@ -60,6 +62,7 @@ class TestMarkingSettings(FrappeTestCase):
 		self.assertIn(get_student_order(), SORT_FIELD)
 
 	def _students(self, count):
+		needs_doctype(self, "Student")
 		students = frappe.get_all("Student", pluck="name", limit=count)
 		if len(students) < 2:
 			self.skipTest("site has too few students to order")

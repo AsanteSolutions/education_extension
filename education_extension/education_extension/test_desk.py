@@ -19,6 +19,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from education_extension.education_extension import desk
+from education_extension.education_extension.testing import needs_doctype
 
 
 class TestAppPage(IntegrationTestCase):
@@ -143,6 +144,7 @@ class TestAppPage(IntegrationTestCase):
 				frappe.set_user("Administrator")
 
 	def test_a_student_is_not_offered_the_tile(self):
+		needs_doctype(self, "Student")
 		user = frappe.db.get_value("Student", {"user": ("is", "set")}, "user")
 		if not user:
 			self.skipTest("no student with a portal user on this site")

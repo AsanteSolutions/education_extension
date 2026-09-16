@@ -9,6 +9,7 @@ from education_extension.education_extension.doctype.progress_report_issue_date.
 	is_released,
 	release_moment,
 )
+from education_extension.education_extension.testing import needs_doctype
 
 UNKNOWN_TERM = "no-such-term-for-tests"
 UNKNOWN_YEAR = "no-such-year-for-tests"
@@ -65,6 +66,7 @@ class TestProgressReportIssueDate(FrappeTestCase):
 	def _record(self, issue_date, released_to_students_at):
 		"""A submitted record against a year and term the site does not use, so
 		nothing real is affected."""
+		needs_doctype(self, "Academic Year", "Academic Term")
 		year = frappe.get_all("Academic Year", pluck="name", limit=1)
 		term = frappe.get_all("Academic Term", pluck="name", limit=1)
 		if not year or not term:

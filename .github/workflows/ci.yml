@@ -88,9 +88,18 @@ jobs:
       - name: Install
         working-directory: /home/runner/frappe-bench
         run: |
+          # education is declared in required_apps, and it requires erpnext in
+          # turn, so both have to be here before this app will install at all.
+          # Installing them also lets the integration tests actually run: without
+          # Student, Course and Academic Term they skip, and the suite passes
+          # while checking almost nothing.
+          bench get-app --branch version-16 erpnext
+          bench get-app --branch version-16 education
           bench get-app education_extension $GITHUB_WORKSPACE
           bench setup requirements --dev
           bench new-site --db-root-password root --admin-password admin test_site
+          bench --site test_site install-app erpnext
+          bench --site test_site install-app education
           bench --site test_site install-app education_extension
           bench build
         env:

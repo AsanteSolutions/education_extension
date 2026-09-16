@@ -16,48 +16,6 @@ letterhead / add_letterhead -> printed letterhead block. expected_completion -> 
 completion, derived from the highest enrolled semester. The student number is the Student document
 name (doc.student). #}
 
-{#- How much there is to fit, and how hard to squeeze.
-
-A group costs a heading and a header row on top of its modules, so it counts for
-about two rows. Rather than setting one type size that suits the common report
-and letting the long ones spill, the density is chosen from the content.
-
-The registration rules bound how large this can get, which is what the tiers are
-calibrated against. A module is taught in one semester only, so carry-overs step
-back in twos; and semesters 5 and 6 list every earlier module as a prerequisite,
-so a student taking them is carrying nothing. The largest registration the rules
-allow is therefore a second-semester-of-first-year student repeating all of the
-first: 15 modules over 2 semesters. Should every one of those also go to
-supplementary, that is 30 rows in 4 groups — a load of 38, which is the number
-the tiers below are set against.
-
-Measured by rendering this template through wkhtmltopdf and counting pages: at
-load 19 the untightened sheet fits, at 28 it needs compact, at 38 it needs
-tight. Each threshold sits below its measured point so the boundary cases have
-somewhere to go.
-
-Everything stays legible — the tiers only reach for padding, leading and the
-letterhead, and the marks themselves never go below 8pt. -#}
-{%- set ns = namespace(rows=0, groups=0) -%}
-{%- for group in result_groups -%}
-	{%- set ns.rows = ns.rows + (group.rows | length) -%}
-	{%- set ns.groups = ns.groups + 1 -%}
-{%- endfor -%}
-{%- for group in supplementary_groups -%}
-	{%- set ns.rows = ns.rows + (group.rows | length) -%}
-	{%- set ns.groups = ns.groups + 1 -%}
-{%- endfor -%}
-{%- set load = ns.rows + 2 * ns.groups -%}
-{%- if load > 44 -%}
-	{%- set density = "pr-tight pr-ultra" -%}
-{%- elif load > 28 -%}
-	{%- set density = "pr-tight" -%}
-{%- elif load > 18 -%}
-	{%- set density = "pr-compact" -%}
-{%- else -%}
-	{%- set density = "" -%}
-{%- endif -%}
-
 <style>
 	.print-format {
 		font-size: 9pt;
@@ -73,6 +31,23 @@ letterhead, and the marks themselves never go below 8pt. -#}
 		   content band on every page, so it is the cheapest space on the sheet
 		   and the first thing to reclaim when the report runs long. */
 		margin-bottom: 24mm;
+	}
+
+	/* The margins above are read by Frappe and handed to wkhtmltopdf as the page
+	   margins — but the declarations stay in the stylesheet, so WebKit also lays
+	   the element out with them. The bottom one was therefore counted twice: the
+	   page already reserves the band for the footnotes, and then the element
+	   asked for the same distance again below the content. A report ending
+	   anywhere within that band was pushed onto a further page carrying nothing
+	   but the repeating footnotes — a blank sheet, from the reader's side.
+
+	   Selected as `div.print-format` deliberately. Frappe's parser only reads
+	   rules whose selector is exactly `.print-format`, so this one is invisible
+	   to it: the page margins still come from the rule above, while the element
+	   itself lays out flush. */
+	div.print-format {
+		margin-top: 0 !important;
+		margin-bottom: 0 !important;
 	}
 
 	.pr-letterhead {
@@ -166,8 +141,6 @@ letterhead, and the marks themselves never go below 8pt. -#}
 		margin-bottom: 3px;
 	}
 
-	/* Row padding is the one measurement that multiplies by the number of
-	   modules, so it is what the density classes below reach for first. */
 	table.pr-marks th,
 	table.pr-marks td {
 		border: 1px solid #000;
@@ -280,6 +253,42 @@ letterhead, and the marks themselves never go below 8pt. -#}
 		text-transform: uppercase;
 	}
 
+	/* The legend, the remarks lines and the signatures travel together.
+	   The report may run to a second page — that is expected once a student is
+	   carrying enough modules — but the signatures must never be the only thing
+	   on it, which is what happens when the marks fill the first page and the
+	   tail is left to flow on its own. A page holding the legend and the space
+	   for final remarks reads as part of the report; one holding two signature
+	   lines and nothing else reads as a printing fault.
+
+	   Bound to the legend rather than to the last marks table: pulling a table
+	   across would leave a hole where it was, whereas the legend is reference
+	   material and sits as well on one page as the other. */
+	/* A table, not a div, and that is the whole point: wkhtmltopdf's WebKit
+	   ignores page-break-inside on a block box — switching the rule on and off
+	   changed nothing — but honours it on a table row. So the tail is one row
+	   with one cell, and everything in it travels together.
+
+	   It also fixes a second fault. A report could finish a hair past the foot
+	   of the page — the bottom edge of the signature block and no ink at all —
+	   and wkhtmltopdf answers that with an entire extra page carrying nothing
+	   but the repeating footnotes. Held together, a tail that would land that
+	   close moves over whole instead. */
+	table.pr-tail,
+	table.pr-tail > tbody > tr > td {
+		border: 0 !important;
+		padding: 0 !important;
+	}
+
+	table.pr-tail {
+		width: 100%;
+		border-collapse: collapse;
+	}
+
+	table.pr-tail > tbody > tr {
+		page-break-inside: avoid;
+	}
+
 	/* Footer footnote lines. Frappe renders only the CHILDREN of id="footer-html"
 	   into the wkhtmltopdf footer (the wrapping div/class is dropped), so the
 	   class must be on the <p> tags themselves for the styling to apply. */
@@ -317,186 +326,6 @@ letterhead, and the marks themselves never go below 8pt. -#}
 	.pr-note-line sup {
 		font-weight: bold;
 	}
-
-	/* ---------------------------------------------------------------------
-	   Density tiers, applied to the whole sheet by the `density` variable at
-	   the top of this file. Each tier only takes space back from padding,
-	   leading and the letterhead — nothing is dropped from the report and no
-	   mark, code or name is set smaller than it can be read at.
-
-	   If a report ever spills to a second page again, the order to tighten in
-	   is: the band reserved for the footer (.print-format margin-bottom), then
-	   the legend, then these tiers.
-	   --------------------------------------------------------------------- */
-
-	.pr-compact .pr-letterhead img {
-		max-height: 19mm !important;
-	}
-
-	.pr-compact table.pr-marks th,
-	.pr-compact table.pr-marks td {
-		padding: 1px 4px !important;
-		line-height: 1.1;
-	}
-
-	.pr-compact .pr-section-heading {
-		margin: 4px 0 1px;
-	}
-
-	.pr-compact table.pr-legend {
-		margin: 4px 0;
-		font-size: 6.5pt;
-	}
-
-	.pr-compact table.pr-legend td {
-		padding: 0 4px !important;
-	}
-
-	.pr-compact .pr-title {
-		font-size: 13pt;
-		margin: 2px 0;
-	}
-
-	.pr-compact .pr-final-remarks-label {
-		margin-top: 5px;
-	}
-
-	.pr-compact .pr-final-remarks-line {
-		height: 11px;
-		margin: 4px 0;
-	}
-
-	.pr-compact table.pr-signatures {
-		margin-top: 6px;
-	}
-
-	.pr-compact .pr-signature-img,
-	.pr-compact .pr-signature-space {
-		max-height: 30px;
-		height: 30px;
-	}
-
-	/* The long tail: a student repeating across several semesters with
-	   supplementaries in each. */
-	.pr-tight .pr-letterhead img {
-		max-height: 14mm !important;
-	}
-
-	.pr-tight .pr-letterhead {
-		margin-bottom: 4px;
-	}
-
-	.pr-tight table.pr-marks {
-		font-size: 8pt;
-		margin-bottom: 2px;
-	}
-
-	.pr-tight table.pr-marks th,
-	.pr-tight table.pr-marks td {
-		padding: 0 4px !important;
-		line-height: 1.1;
-	}
-
-	.pr-tight .pr-section-heading {
-		font-size: 8pt;
-		margin: 3px 0 1px;
-	}
-
-	.pr-tight table.pr-legend {
-		margin: 3px 0;
-		font-size: 6pt;
-	}
-
-	.pr-tight table.pr-legend td {
-		padding: 0 3px !important;
-		line-height: 1.1;
-	}
-
-	.pr-tight .pr-title {
-		font-size: 12pt;
-		margin: 1px 0;
-	}
-
-	.pr-tight .pr-qualification {
-		margin-bottom: 3px;
-	}
-
-	.pr-tight .pr-student-info {
-		margin-bottom: 3px;
-	}
-
-	.pr-tight .pr-student-info td {
-		padding: 0 4px;
-	}
-
-	.pr-tight .pr-final-remarks-label {
-		margin-top: 4px;
-	}
-
-	.pr-tight .pr-final-remarks-line {
-		height: 9px;
-		margin: 3px 0;
-	}
-
-	.pr-tight table.pr-signatures {
-		margin-top: 4px;
-	}
-
-	.pr-tight .pr-signature-img,
-	.pr-tight .pr-signature-space {
-		max-height: 24px;
-		height: 24px;
-	}
-
-	/* Applied on top of pr-tight. Nothing the current curriculum can produce
-	   reaches this — the rules cap a report at a load of 38 and pr-tight covers
-	   that with room to spare — so it is margin rather than a working tier: if
-	   a semester grows, or the carry-over rule is relaxed, the report tightens
-	   again instead of silently spilling. Past this there is nothing left to
-	   take that would not cost more in legibility than the second page does. */
-	.pr-ultra .pr-letterhead img {
-		max-height: 9mm !important;
-	}
-
-	.pr-ultra table.pr-marks {
-		font-size: 7.5pt;
-	}
-
-	.pr-ultra table.pr-marks th,
-	.pr-ultra table.pr-marks td {
-		padding: 0 3px !important;
-		line-height: 1.05;
-	}
-
-	.pr-ultra .pr-section-heading {
-		font-size: 7.5pt;
-		margin: 2px 0 0;
-	}
-
-	.pr-ultra table.pr-legend {
-		margin: 2px 0;
-		font-size: 5.5pt;
-	}
-
-	.pr-ultra table.pr-legend td {
-		padding: 0 2px !important;
-		line-height: 1.05;
-	}
-
-	.pr-ultra .pr-title {
-		font-size: 11pt;
-	}
-
-	.pr-ultra .pr-final-remarks-line {
-		height: 8px;
-		margin: 2px 0;
-	}
-
-	.pr-ultra .pr-signature-img,
-	.pr-ultra .pr-signature-space {
-		max-height: 18px;
-		height: 18px;
-	}
 </style>
 
 {%- macro marks_table(rows, remarks={}) -%}
@@ -523,7 +352,7 @@ letterhead, and the marks themselves never go below 8pt. -#}
 </table>
 {%- endmacro -%}
 
-<div class="page-break {{ density }}">
+<div class="page-break">
 	{#- Render the letterhead inline as normal flow content. Giving it id="header-html" would make
 	Frappe extract it into a repeating wkhtmltopdf page header and reserve a large top margin on
 	every page. -#} {% if letterhead and add_letterhead %}
@@ -572,6 +401,9 @@ letterhead, and the marks themselves never go below 8pt. -#}
 	<div class="pr-section-heading">{{ group.label }} {{ _("– Supplementary Exam") }}</div>
 	{{ marks_table(group.rows, remarks=supplementary_remarks) }} {%- endfor %} {# ----------------
 	Legend ---------------- #}
+	<table class="pr-tail">
+		<tr>
+			<td>
 	<table class="pr-legend">
 		<tr>
 			<td class="legend-title" colspan="6">{{ _("Legend") }}</td>
@@ -634,6 +466,9 @@ letterhead, and the marks themselves never go below 8pt. -#}
 					{{ signature_two_name }}<br />
 					{{ signature_two_role }}
 				</div>
+			</td>
+		</tr>
+	</table>
 			</td>
 		</tr>
 	</table>

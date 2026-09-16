@@ -16,15 +16,28 @@ letterhead / add_letterhead -> printed letterhead block. expected_completion -> 
 completion, derived from the highest enrolled semester. The student number is the Student document
 name (doc.student). #}
 
-{#- How much there is to fit. A group costs a heading and a header row on top of
-its modules, so it counts for about two rows. The report has to come out on one
-page whatever a student is carrying — a sixth-semester student repeating modules
-from two earlier semesters with supplementaries in both is several times the
-size of a first-year one — so rather than setting a type size that suits the
-common case and letting the long ones spill, the density is chosen from the
-content and the whole sheet tightens to match. Everything stays legible: the
-tiers only reach for padding, leading and the letterhead, and the marks
-themselves never go below 8pt. -#}
+{#- How much there is to fit, and how hard to squeeze.
+
+A group costs a heading and a header row on top of its modules, so it counts for
+about two rows. Rather than setting one type size that suits the common report
+and letting the long ones spill, the density is chosen from the content.
+
+The registration rules bound how large this can get, which is what the tiers are
+calibrated against. A module is taught in one semester only, so carry-overs step
+back in twos; and semesters 5 and 6 list every earlier module as a prerequisite,
+so a student taking them is carrying nothing. The largest registration the rules
+allow is therefore a second-semester-of-first-year student repeating all of the
+first: 15 modules over 2 semesters. Should every one of those also go to
+supplementary, that is 30 rows in 4 groups — a load of 38, which is the number
+the tiers below are set against.
+
+Measured by rendering this template through wkhtmltopdf and counting pages: at
+load 19 the untightened sheet fits, at 28 it needs compact, at 38 it needs
+tight. Each threshold sits below its measured point so the boundary cases have
+somewhere to go.
+
+Everything stays legible — the tiers only reach for padding, leading and the
+letterhead, and the marks themselves never go below 8pt. -#}
 {%- set ns = namespace(rows=0, groups=0) -%}
 {%- for group in result_groups -%}
 	{%- set ns.rows = ns.rows + (group.rows | length) -%}
@@ -35,11 +48,11 @@ themselves never go below 8pt. -#}
 	{%- set ns.groups = ns.groups + 1 -%}
 {%- endfor -%}
 {%- set load = ns.rows + 2 * ns.groups -%}
-{%- if load > 40 -%}
+{%- if load > 44 -%}
 	{%- set density = "pr-tight pr-ultra" -%}
-{%- elif load > 30 -%}
+{%- elif load > 28 -%}
 	{%- set density = "pr-tight" -%}
-{%- elif load > 20 -%}
+{%- elif load > 18 -%}
 	{%- set density = "pr-compact" -%}
 {%- else -%}
 	{%- set density = "" -%}
@@ -435,11 +448,12 @@ themselves never go below 8pt. -#}
 		height: 24px;
 	}
 
-	/* Applied on top of pr-tight, for a report carrying more semesters than the
-	   qualification is long. Past this there is nothing left to take that would
-	   not make the marks harder to read than they are worth, so a report bigger
-	   than this is allowed its second page rather than being squeezed into an
-	   unreadable one. */
+	/* Applied on top of pr-tight. Nothing the current curriculum can produce
+	   reaches this — the rules cap a report at a load of 38 and pr-tight covers
+	   that with room to spare — so it is margin rather than a working tier: if
+	   a semester grows, or the carry-over rule is relaxed, the report tightens
+	   again instead of silently spilling. Past this there is nothing left to
+	   take that would not cost more in legibility than the second page does. */
 	.pr-ultra .pr-letterhead img {
 		max-height: 9mm !important;
 	}

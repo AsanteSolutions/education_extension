@@ -97,12 +97,12 @@ add_to_apps_screen = [
 # ------------
 
 # before_install = "education_extension.install.before_install"
-after_install = "education_extension.education_extension.desk.add_to_education_workspace"
+after_install = "education_extension.education_extension.desk.apply_desk_records"
 
 # Runs last, after the education app has re-synced its own Workspace and
 # Workspace Sidebar over whatever was in the database. Anything added to those
 # by hand does not survive a migrate; this re-applies our links so they do.
-after_migrate = ["education_extension.education_extension.desk.add_to_education_workspace"]
+after_migrate = ["education_extension.education_extension.desk.apply_desk_records"]
 
 # Uninstallation
 # ------------

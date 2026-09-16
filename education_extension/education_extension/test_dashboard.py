@@ -27,6 +27,7 @@ from education_extension.education_extension.report.registration_status.registra
 	NOT_THIS_TERM,
 	REGISTERED,
 )
+from education_extension.education_extension.testing import needs_doctype
 
 MODULE = "Education Extension"
 
@@ -140,6 +141,7 @@ class TestDashboardWiring(IntegrationTestCase):
 	def test_a_chart_honours_the_term_it_is_given(self):
 		"""Otherwise the filter is there, does nothing, and quietly tells the
 		reader the two terms are identical."""
+		needs_doctype(self, "Academic Term")
 		terms = frappe.get_all("Academic Term", pluck="name")
 		focus = dashboard.term_in_focus()
 		other = [term for term in terms if term != focus]
@@ -334,6 +336,7 @@ class TestDashboardPermissions(IntegrationTestCase):
 		self.assertEqual(set(dashboard.REGISTRAR_ROLES), granted)
 
 	def test_a_student_cannot_read_the_cohort_numbers(self):
+		needs_doctype(self, "Student")
 		user = frappe.db.get_value("Student", {"user": ("is", "set")}, "user")
 		if not user:
 			self.skipTest("no student with a portal user on this site")

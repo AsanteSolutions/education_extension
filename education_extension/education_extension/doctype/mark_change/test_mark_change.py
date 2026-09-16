@@ -12,6 +12,7 @@ from education_extension.education_extension.doctype.course_mark_sheet.course_ma
 from education_extension.education_extension.doctype.mark_change.mark_change import (
 	has_remark_changes,
 )
+from education_extension.education_extension.testing import needs_doctype
 
 
 class TestMarkChange(FrappeTestCase):
@@ -57,24 +58,28 @@ class TestMarkChange(FrappeTestCase):
 		self.assertTrue(meta.get_field("applied_on").read_only)
 
 	def _student(self):
+		needs_doctype(self, "Student")
 		students = frappe.get_all("Student", pluck="name", limit=1)
 		if not students:
 			self.skipTest("site has no students")
 		return students[0]
 
 	def _course(self):
+		needs_doctype(self, "Course")
 		courses = frappe.get_all("Course", pluck="name", limit=1)
 		if not courses:
 			self.skipTest("site has no courses")
 		return courses[0]
 
 	def _year(self):
+		needs_doctype(self, "Academic Year")
 		years = frappe.get_all("Academic Year", pluck="name", limit=1)
 		if not years:
 			self.skipTest("site has no academic years")
 		return years[0]
 
 	def _term(self):
+		needs_doctype(self, "Academic Term")
 		terms = frappe.get_all("Academic Term", pluck="name", limit=1)
 		if not terms:
 			self.skipTest("site has no academic terms")

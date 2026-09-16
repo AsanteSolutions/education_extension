@@ -184,7 +184,10 @@ def days_left_to_register(filters=None):
 	registrar_only()
 	period = period_in_focus()
 	if not period:
-		return {"value": 0}
+		# Still somewhere to go. A card with no route is clickable and does
+		# nothing, and "no window is open" is exactly when a registrar wants the
+		# list of periods.
+		return {"value": 0, "route": ["List", "Registration Period"]}
 	return {
 		"value": max(date_diff(period.last_date_to_register, getdate(nowdate())), 0),
 		"route": ["Form", "Registration Period", period.name],
@@ -198,7 +201,7 @@ def consent_forms_signed(filters=None):
 	registrar_only()
 	term = term_in_focus()
 	if not term:
-		return {"value": 0}
+		return {"value": 0, "route": ["List", "Registration Consent"]}
 	return {
 		"value": frappe.db.count(
 			"Registration Consent", {"academic_term": term, "docstatus": 1}

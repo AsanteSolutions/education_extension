@@ -25,6 +25,7 @@ well, so a doctype added to the page turns up in both places.
 """
 
 import json
+import os
 from contextlib import contextmanager
 
 import frappe
@@ -49,6 +50,50 @@ def has_app_permission():
 	return bool(STAFF_ROLES & set(frappe.get_roles()))
 
 
+def apply_desk_records():
+	"""after_install / after_migrate hook. Safe to call at any time."""
+	ensure_desk_icon()
+	add_to_education_workspace()
+
+
+def ensure_desk_icon():
+	"""Create the desk icon, because Frappe will not.
+
+	It ships as a standard record beside the app, the same way the workspace and
+	the sidebar do — but `Desktop Icon` is not in Frappe's IMPORTABLE_DOCTYPES,
+	so that file is read by nothing and the record is never made. The icon was
+	therefore only ever on sites where somebody had created one by hand, and a
+	fresh install had none.
+
+	The file stays the definition; this only carries it into the database, so
+	there is still one place the icon is described — which is also why the insert
+	is kept from writing back to it.
+	"""
+	if not frappe.db.exists("DocType", "Desktop Icon"):
+		# Older Frappe, or one built without the desk module.
+		return
+	if frappe.db.exists("Desktop Icon", SOURCE):
+		return
+
+	path = frappe.get_app_path(
+		"education_extension", "desktop_icon", "education_extension.json"
+	)
+	if not os.path.exists(path):
+		return
+
+	with open(path, encoding="utf-8") as handle:
+		record = json.load(handle)
+
+	# Left to Frappe: stamped fresh rather than carrying the file's own.
+	for stamp in ("creation", "modified", "owner", "modified_by", "idx", "docstatus"):
+		record.pop(stamp, None)
+
+	with _without_writing_to_the_source_tree():
+		frappe.get_doc(record).insert(ignore_permissions=True)
+
+	print("Education Extension: created the desk icon")
+
+
 def add_to_education_workspace():
 	"""after_migrate hook. Safe to call at any time."""
 	if not frappe.db.exists("Workspace", TARGET):
@@ -60,7 +105,7 @@ def add_to_education_workspace():
 		# Our own workspace has not synced yet, so there is nothing to copy.
 		return
 
-	with _without_writing_to_the_education_app():
+	with _without_writing_to_the_source_tree():
 		added_links = _add_cards(cards)
 		added_items = _add_sidebar_items(cards)
 
@@ -94,14 +139,16 @@ def _cards():
 
 
 @contextmanager
-def _without_writing_to_the_education_app():
-	"""Keep these saves out of another app's source tree.
+def _without_writing_to_the_source_tree():
+	"""Keep these saves out of anyone's source tree.
 
-	On a developer_mode site, saving a standard Workspace or Workspace Sidebar
-	writes it back to the app that owns it. The records saved here are the
-	education app's own, so without this every migrate rewrites files under
-	apps/education -- on this site that was over a thousand lines of churn in a
-	repository this app has no business touching.
+	On a developer_mode site, saving a standard record writes it back to the app
+	that owns it. Two things here need that suppressed. The Workspace and
+	Workspace Sidebar being edited are the education app's own, so without this
+	every migrate rewrites files under apps/education -- on this site that was
+	over a thousand lines of churn in a repository this app has no business
+	touching. The desk icon is this app's own file, and re-exporting it on every
+	migrate restamps its timestamps and leaves a diff nobody made.
 
 	`Workspace` checks a set of flags before exporting and `Workspace Sidebar`
 	checks `in_import`, so both are set. They are the flags Frappe itself uses to

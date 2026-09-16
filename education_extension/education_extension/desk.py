@@ -52,46 +52,62 @@ def has_app_permission():
 
 def apply_desk_records():
 	"""after_install / after_migrate hook. Safe to call at any time."""
-	ensure_desk_icon()
+	# The sidebar first: the icon links to it.
+	ensure_standard_record("Workspace Sidebar", "workspace_sidebar")
+	ensure_standard_record("Desktop Icon", "desktop_icon")
 	add_to_education_workspace()
 
 
-def ensure_desk_icon():
-	"""Create the desk icon, because Frappe will not.
+def ensure_standard_record(doctype, folder):
+	"""Create a record this app ships that Frappe will not import for itself.
 
-	It ships as a standard record beside the app, the same way the workspace and
-	the sidebar do — but `Desktop Icon` is not in Frappe's IMPORTABLE_DOCTYPES,
-	so that file is read by nothing and the record is never made. The icon was
-	therefore only ever on sites where somebody had created one by hand, and a
-	fresh install had none.
+	Two of them sit in that gap, and both were missing from every fresh install.
+	`Desktop Icon` is not in Frappe's IMPORTABLE_DOCTYPES at all, so nothing ever
+	reads its file. `Workspace Sidebar` is importable, but Frappe looks for
+	standard records under the *module* folder as <doctype>/<name>/<name>.json
+	while its own exporter writes sidebars to the *app* folder as
+	workspace_sidebar/<name>.json — import and export disagree, and the file is
+	written where the importer does not look. Moving it to where the importer
+	looks only starts a fight with the exporter, so both records are created from
+	their files here instead.
 
-	The file stays the definition; this only carries it into the database, so
-	there is still one place the icon is described — which is also why the insert
-	is kept from writing back to it.
+	They existed only on sites where somebody had made one by hand, which is why
+	this went unnoticed: the desk icon and the sidebar were both absent from a
+	clean install, and the sidebar's absence showed up only as a skipped test.
+
+	Create-only. The file stays the description of the record, and anything
+	already in the database is left alone rather than being overwritten from the
+	app on every migrate.
 	"""
-	if not frappe.db.exists("DocType", "Desktop Icon"):
-		# Older Frappe, or one built without the desk module.
+	if not frappe.db.exists("DocType", doctype):
+		# An older Frappe, or one built without that part of the desk.
 		return
-	if frappe.db.exists("Desktop Icon", SOURCE):
+	if frappe.db.exists(doctype, SOURCE):
 		return
 
-	path = frappe.get_app_path(
-		"education_extension", "desktop_icon", "education_extension.json"
-	)
+	path = frappe.get_app_path("education_extension", folder, "education_extension.json")
 	if not os.path.exists(path):
 		return
 
 	with open(path, encoding="utf-8") as handle:
 		record = json.load(handle)
 
-	# Left to Frappe: stamped fresh rather than carrying the file's own.
+	# Left to Frappe, rather than carrying the file's own.
 	for stamp in ("creation", "modified", "owner", "modified_by", "idx", "docstatus"):
 		record.pop(stamp, None)
 
-	with _without_writing_to_the_source_tree():
-		frappe.get_doc(record).insert(ignore_permissions=True)
+	doc = frappe.get_doc(record)
+	# What Frappe's own importer does for a standard record — import_file.py sets
+	# the same flag before inserting. Without it these validate their links while
+	# the site is still being built: the icon points at the sidebar, and the
+	# sidebar points at a dashboard that is synced later still. A record arriving
+	# a moment early should not take the installation down with it.
+	doc.flags.ignore_links = True
 
-	print("Education Extension: created the desk icon")
+	with _without_writing_to_the_source_tree():
+		doc.insert(ignore_permissions=True)
+
+	print("Education Extension: created {0} {1}".format(doctype, SOURCE))
 
 
 def add_to_education_workspace():

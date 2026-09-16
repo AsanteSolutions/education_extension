@@ -65,18 +65,11 @@ name (doc.student). #}
 		margin-left: 0 !important;
 	}
 
-	/* This letterhead is a single image, and it is the largest thing on the page
-	   after the marks themselves. It is bounded by HEIGHT rather than width: the
-	   file is a screenshot whose proportions nobody here controls, so a width
-	   percentage says nothing about how much of the page it eats — swap in a
-	   taller crop and the report silently grows a second page. A max-height caps
-	   the cost whatever the image turns out to be, and max-width keeps it from
-	   stretching across the sheet if a very wide one is used.
-	   (zoom/transform are ignored by wkhtmltopdf's WebKit.) */
+	/* This letterhead is a single full-width image, so its size is controlled by
+	   the image width (zoom/transform are ignored by wkhtmltopdf's WebKit).
+	   Lower the percentage to make the letterhead smaller. */
 	.pr-letterhead img {
-		max-width: 80% !important;
-		max-height: 26mm !important;
-		width: auto !important;
+		width: 80% !important;
 		height: auto !important;
 		margin-left: -5px !important;
 		margin-right: auto !important;

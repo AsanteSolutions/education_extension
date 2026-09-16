@@ -60,3 +60,6 @@ education_extension/public/frontend
 education_extension/www/education.html
 education_extension/www/student-portal.html
 ./node_modules
+
+# Local code-review notes, not shared
+code-review-findings.md

@@ -16,6 +16,35 @@ letterhead / add_letterhead -> printed letterhead block. expected_completion -> 
 completion, derived from the highest enrolled semester. The student number is the Student document
 name (doc.student). #}
 
+{#- How much there is to fit. A group costs a heading and a header row on top of
+its modules, so it counts for about two rows. The report has to come out on one
+page whatever a student is carrying — a sixth-semester student repeating modules
+from two earlier semesters with supplementaries in both is several times the
+size of a first-year one — so rather than setting a type size that suits the
+common case and letting the long ones spill, the density is chosen from the
+content and the whole sheet tightens to match. Everything stays legible: the
+tiers only reach for padding, leading and the letterhead, and the marks
+themselves never go below 8pt. -#}
+{%- set ns = namespace(rows=0, groups=0) -%}
+{%- for group in result_groups -%}
+	{%- set ns.rows = ns.rows + (group.rows | length) -%}
+	{%- set ns.groups = ns.groups + 1 -%}
+{%- endfor -%}
+{%- for group in supplementary_groups -%}
+	{%- set ns.rows = ns.rows + (group.rows | length) -%}
+	{%- set ns.groups = ns.groups + 1 -%}
+{%- endfor -%}
+{%- set load = ns.rows + 2 * ns.groups -%}
+{%- if load > 40 -%}
+	{%- set density = "pr-tight pr-ultra" -%}
+{%- elif load > 30 -%}
+	{%- set density = "pr-tight" -%}
+{%- elif load > 20 -%}
+	{%- set density = "pr-compact" -%}
+{%- else -%}
+	{%- set density = "" -%}
+{%- endif -%}
+
 <style>
 	.print-format {
 		font-size: 9pt;
@@ -26,7 +55,11 @@ name (doc.student). #}
 		   with no page header is 15mm). Bottom reserves space for the footnote
 		   footer (id="footer-html"); tune if it clips or floats too high. */
 		margin-top: 6mm;
-		margin-bottom: 36mm;
+		/* Sized to the footnotes at their current type size — they measure about
+		   18mm — with a little slack. Every millimetre here is taken off the
+		   content band on every page, so it is the cheapest space on the sheet
+		   and the first thing to reclaim when the report runs long. */
+		margin-bottom: 24mm;
 	}
 
 	.pr-letterhead {
@@ -44,11 +77,18 @@ name (doc.student). #}
 		margin-left: 0 !important;
 	}
 
-	/* This letterhead is a single full-width image, so its size is controlled by
-	   the image width (zoom/transform are ignored by wkhtmltopdf's WebKit).
-	   Lower the percentage to make the letterhead smaller. */
+	/* This letterhead is a single image, and it is the largest thing on the page
+	   after the marks themselves. It is bounded by HEIGHT rather than width: the
+	   file is a screenshot whose proportions nobody here controls, so a width
+	   percentage says nothing about how much of the page it eats — swap in a
+	   taller crop and the report silently grows a second page. A max-height caps
+	   the cost whatever the image turns out to be, and max-width keeps it from
+	   stretching across the sheet if a very wide one is used.
+	   (zoom/transform are ignored by wkhtmltopdf's WebKit.) */
 	.pr-letterhead img {
-		width: 80% !important;
+		max-width: 80% !important;
+		max-height: 26mm !important;
+		width: auto !important;
 		height: auto !important;
 		margin-left: -5px !important;
 		margin-right: auto !important;
@@ -56,18 +96,18 @@ name (doc.student). #}
 
 	.pr-title {
 		text-align: center;
-		font-size: 18pt;
+		font-size: 15pt;
 		font-weight: bold;
 		letter-spacing: 1px;
 		color: #2f4f1f;
-		margin: 8px 0;
+		margin: 4px 0;
 	}
 
 	.pr-qualification {
 		text-align: center;
 		font-weight: bold;
 		text-transform: uppercase;
-		margin-bottom: 12px;
+		margin-bottom: 6px;
 		color: #2f4f1f;
 	}
 
@@ -82,13 +122,13 @@ name (doc.student). #}
 	.pr-student-info {
 		width: 100%;
 		border-collapse: collapse;
-		margin-bottom: 10px;
+		margin-bottom: 6px;
 		table-layout: fixed;
 	}
 
 	.pr-student-info td {
 		width: 50%;
-		padding: 2px 4px;
+		padding: 1px 4px;
 		vertical-align: top !important;
 		font-weight: bold;
 	}
@@ -104,19 +144,22 @@ name (doc.student). #}
 	.pr-section-heading {
 		font-weight: bold;
 		text-transform: uppercase;
-		margin: 14px 0 4px;
+		margin: 6px 0 2px;
 	}
 
 	table.pr-marks {
 		width: 100%;
 		border-collapse: collapse;
-		margin-bottom: 6px;
+		margin-bottom: 3px;
 	}
 
+	/* Row padding is the one measurement that multiplies by the number of
+	   modules, so it is what the density classes below reach for first. */
 	table.pr-marks th,
 	table.pr-marks td {
 		border: 1px solid #000;
-		padding: 5px 6px !important;
+		padding: 2px 5px !important;
+		line-height: 1.2;
 		vertical-align: top;
 		font-weight: bold;
 	}
@@ -143,18 +186,20 @@ name (doc.student). #}
 		text-align: center;
 	}
 
-	/* Legend */
+	/* Legend. Reference material rather than the student's own marks, so it is
+	   set a size down from the tables and kept as tight as it can be read at. */
 	table.pr-legend {
 		width: 100%;
 		border-collapse: collapse;
-		margin: 14px 0;
-		font-size: 8pt;
+		margin: 6px 0;
+		font-size: 7pt;
 	}
 
 	table.pr-legend td,
 	table.pr-legend th {
 		border: 1px solid #000;
-		padding: 3px 5px !important;
+		padding: 1px 4px !important;
+		line-height: 1.15;
 		font-weight: bold;
 	}
 
@@ -176,18 +221,18 @@ name (doc.student). #}
 		font-weight: bold;
 		text-transform: uppercase;
 		color: #2f4f1f;
-		margin-top: 18px;
+		margin-top: 8px;
 	}
 
 	.pr-final-remarks-line {
 		border-bottom: 1px dotted #888;
-		height: 18px;
-		margin: 10px 0;
+		height: 14px;
+		margin: 6px 0;
 	}
 
 	table.pr-signatures {
 		width: 100%;
-		margin-top: 24px;
+		margin-top: 10px;
 		border-collapse: collapse;
 	}
 
@@ -201,15 +246,17 @@ name (doc.student). #}
 	/* Signature image sits just above the signature line. */
 	.pr-signature-img {
 		display: block;
-		max-height: 55px;
+		max-height: 40px;
 		max-width: 80%;
 		margin-bottom: 2px;
 	}
 
 	/* Reserves the same height as the image when no signature is set, so the
-	   signature line stays at a consistent position with or without an image. */
+	   signature line stays at a consistent position with or without an image.
+	   Kept equal to the image's max-height above — changing one without the
+	   other makes signed and unsigned reports sit differently on the page. */
 	.pr-signature-space {
-		height: 55px;
+		height: 40px;
 		margin-bottom: 2px;
 	}
 
@@ -224,9 +271,9 @@ name (doc.student). #}
 	   into the wkhtmltopdf footer (the wrapping div/class is dropped), so the
 	   class must be on the <p> tags themselves for the styling to apply. */
 	.pr-note-line {
-		font-size: 7pt;
-		line-height: 1.25;
-		margin: 0 0 3px;
+		font-size: 6.5pt;
+		line-height: 1.15;
+		margin: 0 0 1px;
 		font-weight: bold;
 	}
 
@@ -247,15 +294,194 @@ name (doc.student). #}
 	   the footnotes but set to the right so it does not read as another note. As
 	   with those, the class has to sit on the element itself (see #footer-html). */
 	.pr-print-date {
-		font-size: 7pt;
-		line-height: 1.25;
-		margin: 3px 0 0;
+		font-size: 6.5pt;
+		line-height: 1.15;
+		margin: 1px 0 0;
 		text-align: right;
 		font-weight: bold;
 	}
 
 	.pr-note-line sup {
 		font-weight: bold;
+	}
+
+	/* ---------------------------------------------------------------------
+	   Density tiers, applied to the whole sheet by the `density` variable at
+	   the top of this file. Each tier only takes space back from padding,
+	   leading and the letterhead — nothing is dropped from the report and no
+	   mark, code or name is set smaller than it can be read at.
+
+	   If a report ever spills to a second page again, the order to tighten in
+	   is: the band reserved for the footer (.print-format margin-bottom), then
+	   the legend, then these tiers.
+	   --------------------------------------------------------------------- */
+
+	.pr-compact .pr-letterhead img {
+		max-height: 19mm !important;
+	}
+
+	.pr-compact table.pr-marks th,
+	.pr-compact table.pr-marks td {
+		padding: 1px 4px !important;
+		line-height: 1.1;
+	}
+
+	.pr-compact .pr-section-heading {
+		margin: 4px 0 1px;
+	}
+
+	.pr-compact table.pr-legend {
+		margin: 4px 0;
+		font-size: 6.5pt;
+	}
+
+	.pr-compact table.pr-legend td {
+		padding: 0 4px !important;
+	}
+
+	.pr-compact .pr-title {
+		font-size: 13pt;
+		margin: 2px 0;
+	}
+
+	.pr-compact .pr-final-remarks-label {
+		margin-top: 5px;
+	}
+
+	.pr-compact .pr-final-remarks-line {
+		height: 11px;
+		margin: 4px 0;
+	}
+
+	.pr-compact table.pr-signatures {
+		margin-top: 6px;
+	}
+
+	.pr-compact .pr-signature-img,
+	.pr-compact .pr-signature-space {
+		max-height: 30px;
+		height: 30px;
+	}
+
+	/* The long tail: a student repeating across several semesters with
+	   supplementaries in each. */
+	.pr-tight .pr-letterhead img {
+		max-height: 14mm !important;
+	}
+
+	.pr-tight .pr-letterhead {
+		margin-bottom: 4px;
+	}
+
+	.pr-tight table.pr-marks {
+		font-size: 8pt;
+		margin-bottom: 2px;
+	}
+
+	.pr-tight table.pr-marks th,
+	.pr-tight table.pr-marks td {
+		padding: 0 4px !important;
+		line-height: 1.1;
+	}
+
+	.pr-tight .pr-section-heading {
+		font-size: 8pt;
+		margin: 3px 0 1px;
+	}
+
+	.pr-tight table.pr-legend {
+		margin: 3px 0;
+		font-size: 6pt;
+	}
+
+	.pr-tight table.pr-legend td {
+		padding: 0 3px !important;
+		line-height: 1.1;
+	}
+
+	.pr-tight .pr-title {
+		font-size: 12pt;
+		margin: 1px 0;
+	}
+
+	.pr-tight .pr-qualification {
+		margin-bottom: 3px;
+	}
+
+	.pr-tight .pr-student-info {
+		margin-bottom: 3px;
+	}
+
+	.pr-tight .pr-student-info td {
+		padding: 0 4px;
+	}
+
+	.pr-tight .pr-final-remarks-label {
+		margin-top: 4px;
+	}
+
+	.pr-tight .pr-final-remarks-line {
+		height: 9px;
+		margin: 3px 0;
+	}
+
+	.pr-tight table.pr-signatures {
+		margin-top: 4px;
+	}
+
+	.pr-tight .pr-signature-img,
+	.pr-tight .pr-signature-space {
+		max-height: 24px;
+		height: 24px;
+	}
+
+	/* Applied on top of pr-tight, for a report carrying more semesters than the
+	   qualification is long. Past this there is nothing left to take that would
+	   not make the marks harder to read than they are worth, so a report bigger
+	   than this is allowed its second page rather than being squeezed into an
+	   unreadable one. */
+	.pr-ultra .pr-letterhead img {
+		max-height: 9mm !important;
+	}
+
+	.pr-ultra table.pr-marks {
+		font-size: 7.5pt;
+	}
+
+	.pr-ultra table.pr-marks th,
+	.pr-ultra table.pr-marks td {
+		padding: 0 3px !important;
+		line-height: 1.05;
+	}
+
+	.pr-ultra .pr-section-heading {
+		font-size: 7.5pt;
+		margin: 2px 0 0;
+	}
+
+	.pr-ultra table.pr-legend {
+		margin: 2px 0;
+		font-size: 5.5pt;
+	}
+
+	.pr-ultra table.pr-legend td {
+		padding: 0 2px !important;
+		line-height: 1.05;
+	}
+
+	.pr-ultra .pr-title {
+		font-size: 11pt;
+	}
+
+	.pr-ultra .pr-final-remarks-line {
+		height: 8px;
+		margin: 2px 0;
+	}
+
+	.pr-ultra .pr-signature-img,
+	.pr-ultra .pr-signature-space {
+		max-height: 18px;
+		height: 18px;
 	}
 </style>
 
@@ -283,7 +509,7 @@ name (doc.student). #}
 </table>
 {%- endmacro -%}
 
-<div class="page-break">
+<div class="page-break {{ density }}">
 	{#- Render the letterhead inline as normal flow content. Giving it id="header-html" would make
 	Frappe extract it into a repeating wkhtmltopdf page header and reserve a large top margin on
 	every page. -#} {% if letterhead and add_letterhead %}

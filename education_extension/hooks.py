@@ -17,7 +17,12 @@ website_route_rules = [
 # Apps
 # ------------------
 
-# required_apps = []
+# Nearly everything here reads or writes the education app's doctypes — Student,
+# Course, Program Enrollment, Academic Year, Academic Term, Assessment Result.
+# Without it this app installs onto a site where none of that exists and fails at
+# the first registration or mark, rather than at install time where the problem
+# can be read. Frappe checks this before installing, so it fails early instead.
+required_apps = ["education"]
 
 # Shown as its own tile on the apps screen, next to Education rather than buried
 # inside it. The route is this app own workspace; the permission check keeps the

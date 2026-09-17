@@ -264,8 +264,26 @@ def _add_cards(cards):
 	_resequence(workspace.links)
 	workspace.content = json.dumps(content)
 	workspace.flags.ignore_permissions = True
+	_repair_missing_type(workspace)
 	workspace.save()
 	return added or blocks
+
+
+def _repair_missing_type(workspace):
+	"""Fill in a mandatory field the education app's own page is missing.
+
+	`type` became mandatory on Workspace after that app's file was last written,
+	and the file still has no such key. Frappe's importer does not enforce
+	mandatory fields, so on a fresh site the page arrives with the column empty
+	and the first ordinary save of it fails -- and since this hook is that first
+	save, `bench install-app` died here rather than anywhere near the cause.
+
+	Filled in rather than saved around: "Workspace" is what the field means for a
+	page like this one, and it is what every site that has migrated since the
+	field appeared already holds. Only touched when it is empty.
+	"""
+	if not workspace.type:
+		workspace.type = "Workspace"
 
 
 def _place_card(workspace, label, icon, wanted):

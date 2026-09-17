@@ -11,6 +11,12 @@ from education_extension.education_extension.doctype.progress_report_issue_date.
 )
 from education_extension.education_extension.testing import needs_doctype
 
+# Stops Frappe walking this app link fields into every other app; see the
+# note beside the list.
+from education_extension.education_extension.testing import (  # noqa: F401
+	IGNORE_TEST_RECORD_DEPENDENCIES,
+)
+
 UNKNOWN_TERM = "no-such-term-for-tests"
 UNKNOWN_YEAR = "no-such-year-for-tests"
 

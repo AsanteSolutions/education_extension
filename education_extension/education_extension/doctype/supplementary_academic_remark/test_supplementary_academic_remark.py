@@ -5,11 +5,11 @@
 from frappe.tests import IntegrationTestCase
 
 
-# On IntegrationTestCase, the doctype test records and all
-# link-field test record dependencies are recursively loaded
-# Use these module variables to add/remove to/from that list
-EXTRA_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
-IGNORE_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
+# Stops Frappe walking this app link fields into every other app; see the
+# note beside the list.
+from education_extension.education_extension.testing import (  # noqa: F401
+	IGNORE_TEST_RECORD_DEPENDENCIES,
+)
 
 
 

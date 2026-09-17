@@ -29,6 +29,12 @@ from education_extension.education_extension.doctype.course_mark_sheet.course_ma
 	moderated_value,
 )
 
+# Stops Frappe walking this app link fields into every other app; see the
+# note beside the list.
+from education_extension.education_extension.testing import (  # noqa: F401
+	IGNORE_TEST_RECORD_DEPENDENCIES,
+)
+
 
 def sheet_with(entries, moderation_method=MODERATION_NONE):
 	"""A sheet held in memory. Enough for the parts that are pure arithmetic,

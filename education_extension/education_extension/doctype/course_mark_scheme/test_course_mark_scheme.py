@@ -11,6 +11,12 @@ from education_extension.education_extension.doctype.course_mark_scheme.course_m
 )
 from education_extension.education_extension.testing import needs_doctype
 
+# Stops Frappe walking this app link fields into every other app; see the
+# note beside the list.
+from education_extension.education_extension.testing import (  # noqa: F401
+	IGNORE_TEST_RECORD_DEPENDENCIES,
+)
+
 # One course per shape the marking rules recognise, with the number of
 # assessments each is marked on.
 ARCHETYPES = {

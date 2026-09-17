@@ -14,6 +14,12 @@ from education_extension.education_extension.doctype.marking_settings.marking_se
 )
 from education_extension.education_extension.testing import needs_doctype
 
+# Stops Frappe walking this app link fields into every other app; see the
+# note beside the list.
+from education_extension.education_extension.testing import (  # noqa: F401
+	IGNORE_TEST_RECORD_DEPENDENCIES,
+)
+
 
 class TestMarkingSettings(FrappeTestCase):
 	def test_every_option_sorts_on_a_real_student_field(self):

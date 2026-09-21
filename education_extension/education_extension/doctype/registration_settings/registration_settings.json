@@ -86,7 +86,7 @@
    "label": "Registrar Name"
   },
   {
-   "description": "Drawn once and stamped onto each registration form as it is signed. Changing it does not alter forms already signed, which keep the mark that was on them at the time.",
+   "description": "Drawn once and stamped onto each registration form as it is signed. The pad draws a guide line across itself and saves it with the mark; that line is taken back off when the mark is stamped, so the form prints one rule and not two. Changing this does not alter forms already signed, which keep the mark that was on them at the time.",
    "fieldname": "registrar_signature",
    "fieldtype": "Signature",
    "label": "Registrar Signature"
@@ -107,7 +107,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-21 12:00:00.000000",
+ "modified": "2026-09-21 16:00:00.000000",
  "modified_by": "Administrator",
  "module": "Education Extension",
  "name": "Registration Settings",

@@ -8,14 +8,22 @@ that signature, the modules, and a blank rule for the registrar. Countersigning
 was the one part still done on paper, a page at a time, after the fact.
 
 So the registrar's mark is drawn once in Registration Settings and stamped onto
-each form as it is signed. Stamped, not referenced: the signature is copied onto
-the consent along with the name printed beneath it, the same way the declaration
+each form as it is signed. Stamped, not referenced: the image is read into the
+consent along with the name printed beneath it, the same way the declaration
 wording is copied, because the record has to keep saying what was on it at the
 time. Changing the settings later leaves signed forms alone.
+
+The pad draws a guide line across itself for the signer to write on and saves it
+as part of the mark, and the form draws its own rule under every signature — so
+the line is taken back off on the way through. See `trim`.
 
 Nothing here alters what the student agreed to. The consent is submitted by then
 and these fields are the only ones on it that may be written afterwards.
 """
+
+import base64
+import io
+import mimetypes
 
 import frappe
 from frappe import _
@@ -150,7 +158,107 @@ def modules_for(doc):
 def registrar_mark():
 	"""The signature and name to stamp, from Registration Settings."""
 	settings = frappe.get_single("Registration Settings")
-	return (settings.registrar_signature or "").strip(), (settings.registrar_name or "").strip()
+	return trim(_as_data(settings.registrar_signature)), (settings.registrar_name or "").strip()
+
+
+# How much of the width a run has to cover before it is a rule rather than part
+# of a signature, and how unbroken it has to be. Handwriting reaches this length
+# occasionally; it is never solid along it.
+RULE_SHARE = 0.5
+RULE_SOLIDITY = 0.98
+
+
+def trim(data_uri):
+	"""The mark without the pad's guide line, cropped to what is left.
+
+	The signature pad draws a line across itself for the signer to write on, and
+	saves it as part of the image. The form draws its own rule under every
+	signature, so a mark carrying one printed with two — a short one from the
+	pad above a long one from the page.
+
+	The pad's line gives itself away by being perfectly solid: on a real example
+	it was two rows of 300 pixels across a 300 pixel span, while the most inked
+	row of actual handwriting on the same mark was 83% of its own span. So rows
+	that are long *and* unbroken come off, and the rest is trimmed to its ink so
+	the signature sits on the rule rather than floating above it.
+
+	Anything unreadable is returned untouched. A signature that comes through
+	unchanged still prints; one that fails to stamp does not.
+	"""
+	if not data_uri or not data_uri.startswith("data:image"):
+		return data_uri
+
+	try:
+		from PIL import Image
+
+		head, encoded = data_uri.split(",", 1)
+		image = Image.open(io.BytesIO(base64.b64decode(encoded))).convert("RGBA")
+		pixels = image.load()
+		width, height = image.size
+
+		for y in range(height):
+			run = [x for x in range(width) if _inked(pixels[x, y])]
+			if not run:
+				continue
+			span = run[-1] - run[0] + 1
+			if span < width * RULE_SHARE or len(run) < span * RULE_SOLIDITY:
+				continue
+			for x in range(run[0], run[-1] + 1):
+				pixels[x, y] = (255, 255, 255, 0)
+
+		box = image.getbbox()
+		if box:
+			image = image.crop(box)
+
+		out = io.BytesIO()
+		image.save(out, format="PNG")
+		return "data:image/png;base64,{0}".format(base64.b64encode(out.getvalue()).decode())
+	except Exception:
+		frappe.log_error(title="Registrar signature could not be trimmed")
+		return data_uri
+
+
+def _inked(pixel):
+	red, green, blue, alpha = pixel
+	return alpha > 20 and (red + green + blue) / 3 < 200
+
+
+def _as_data(file_url):
+	"""The uploaded signature as a data URI, ready to be copied onto a record.
+
+	Copied rather than linked. A consent that points at a file is only signed
+	for as long as that file is there and unchanged, and this is the record of
+	who countersigned a registration — it has to keep the mark that was on it.
+
+	Passed through unchanged when it already is a data URI: the field took a
+	drawn signature before it took an uploaded one, and a site set up in that
+	window has the mark stored directly.
+	"""
+	file_url = (file_url or "").strip()
+	if not file_url or file_url.startswith("data:"):
+		return file_url
+
+	name = frappe.db.get_value("File", {"file_url": file_url}, "name")
+	if not name:
+		frappe.throw(
+			_("The registrar signature file is missing: {0}").format(frappe.bold(file_url))
+		)
+
+	# Read as bytes, not through `get_content`: with no encoding given that
+	# decodes the file as text, and a PNG put through a text decode and back
+	# comes out as a different file — the header alone turns from \x89PNG into
+	# three bytes of UTF-8.
+	path = frappe.get_doc("File", name).get_full_path()
+	try:
+		with open(path, "rb") as handle:
+			content = handle.read()
+	except OSError:
+		frappe.throw(
+			_("The registrar signature file cannot be read: {0}").format(frappe.bold(file_url))
+		)
+
+	kind = mimetypes.guess_type(file_url)[0] or "image/png"
+	return "data:{0};base64,{1}".format(kind, base64.b64encode(content).decode())
 
 
 @frappe.whitelist()

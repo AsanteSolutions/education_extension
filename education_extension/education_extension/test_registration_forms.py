@@ -11,6 +11,8 @@ sign by hand. Everything else here protects the queue around that.
     run_tests()
 """
 
+import base64
+import io
 import unittest
 
 import frappe
@@ -19,11 +21,101 @@ from frappe.tests import IntegrationTestCase, UnitTestCase
 from education_extension.education_extension import registration_forms as forms
 from education_extension.education_extension.testing import needs_doctype
 
-# A drawn mark, as the signature pad produces one. A single pixel is enough.
-MARK = (
-	"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
-	"AAAADUlEQVR42mP8z8AAAwAB/wFDkQvzAAAAAElFTkSuQmCC"
-)
+
+def drawn(rule=False, size=(120, 60)):
+	"""A mark as the pad saves one: strokes, and optionally its guide line.
+
+	Built rather than pasted in. A signature fixture has to be something `trim`
+	treats as handwriting, and a single dark pixel is indistinguishable from a
+	rule that happens to be one pixel wide.
+	"""
+	from PIL import Image, ImageDraw
+
+	image = Image.new("RGBA", size, (255, 255, 255, 0))
+	pen = ImageDraw.Draw(image)
+	# A scrawl: diagonals, so no row is solid along its own span.
+	pen.line([(10, 40), (30, 15), (50, 40), (70, 15), (90, 38)], fill=(0, 0, 0, 255), width=2)
+	if rule:
+		# What the pad draws across itself for the signer to write on.
+		pen.line([(8, 52), (size[0] - 8, 52)], fill=(0, 0, 0, 255), width=2)
+
+	out = io.BytesIO()
+	image.save(out, format="PNG")
+	return "data:image/png;base64,{0}".format(base64.b64encode(out.getvalue()).decode())
+
+
+def solid_rows(data_uri):
+	"""The rows `trim` would call a rule."""
+	from PIL import Image
+
+	image = Image.open(io.BytesIO(base64.b64decode(data_uri.split(",", 1)[1]))).convert("RGBA")
+	pixels = image.load()
+	width, height = image.size
+
+	rows = []
+	for y in range(height):
+		run = [x for x in range(width) if forms._inked(pixels[x, y])]
+		if not run:
+			continue
+		span = run[-1] - run[0] + 1
+		if span >= width * forms.RULE_SHARE and len(run) >= span * forms.RULE_SOLIDITY:
+			rows.append(y)
+	return rows
+
+
+def ink(data_uri):
+	from PIL import Image
+
+	image = Image.open(io.BytesIO(base64.b64decode(data_uri.split(",", 1)[1]))).convert("RGBA")
+	pixels = image.load()
+	width, height = image.size
+	return sum(
+		1 for y in range(height) for x in range(width) if forms._inked(pixels[x, y])
+	)
+
+
+MARK = drawn()
+
+
+class TestTrimmingThePadsLine(UnitTestCase):
+	"""The pad saves its guide line with the mark; the form draws its own."""
+
+	def test_the_guide_line_comes_off(self):
+		with_rule = drawn(rule=True)
+		self.assertTrue(solid_rows(with_rule), "the fixture should carry a rule")
+
+		trimmed = forms.trim(with_rule)
+
+		self.assertEqual(solid_rows(trimmed), [])
+
+	def test_the_signature_survives_it(self):
+		"""Taking the line off must not take the handwriting with it."""
+		with_rule = drawn(rule=True)
+		without = drawn(rule=False)
+
+		trimmed = forms.trim(with_rule)
+
+		# What is left is the scrawl, give or take the pixels the rule overlapped.
+		self.assertGreater(ink(trimmed), ink(without) * 0.9)
+
+	def test_a_mark_with_no_line_keeps_its_ink(self):
+		clean = drawn(rule=False)
+		self.assertEqual(ink(forms.trim(clean)), ink(clean))
+
+	def test_it_is_cropped_to_the_signature(self):
+		"""So the mark sits on the form's rule rather than floating above it."""
+		from PIL import Image
+
+		padded = drawn(rule=True, size=(400, 200))
+		trimmed = forms.trim(padded)
+		image = Image.open(io.BytesIO(base64.b64decode(trimmed.split(",", 1)[1])))
+
+		self.assertLess(image.size[0], 400)
+		self.assertLess(image.size[1], 200)
+
+	def test_anything_that_is_not_an_image_is_left_alone(self):
+		for value in ("", None, "/files/somewhere.png", "not a data uri"):
+			self.assertEqual(forms.trim(value), value)
 
 
 class TestSigningRoles(UnitTestCase):
@@ -71,9 +163,9 @@ class TestSigningForms(IntegrationTestCase):
 		"""
 		frappe.db.rollback()
 
-	def give_the_registrar_a_signature(self):
+	def give_the_registrar_a_signature(self, mark=MARK):
 		settings = frappe.get_single("Registration Settings")
-		settings.registrar_signature = MARK
+		settings.registrar_signature = mark
 		settings.flags.ignore_permissions = True
 		settings.save()
 
@@ -82,6 +174,16 @@ class TestSigningForms(IntegrationTestCase):
 		if not queue:
 			self.skipTest("every consent on this site is already signed")
 		return queue[0]["name"]
+
+	def test_the_line_is_gone_by_the_time_it_is_stamped(self):
+		"""The whole of the reported fault: the pad's line and the form's rule
+		both printing, one above the other."""
+		self.give_the_registrar_a_signature(drawn(rule=True))
+		name = self.a_form()
+
+		forms.sign(name)
+
+		self.assertEqual(solid_rows(forms.form(name)["registrar_signature"]), [])
 
 	def test_signing_needs_a_signature_to_sign_with(self):
 		"""Otherwise it would stamp an empty mark and report success, and the
@@ -102,12 +204,47 @@ class TestSigningForms(IntegrationTestCase):
 
 		signed = forms.form(name)
 		self.assertTrue(signed["signed"])
-		self.assertEqual(signed["registrar_signature"], MARK)
+		self.assertTrue(signed["registrar_signature"].startswith("data:image/png;base64,"))
+		self.assertGreater(ink(signed["registrar_signature"]), 0)
 		self.assertTrue(signed["registrar_signed_at"])
 		self.assertEqual(
 			frappe.db.get_value("Registration Consent", name, "signed_by_registrar"),
 			frappe.session.user,
 		)
+
+	def test_an_uploaded_signature_is_read_into_the_form(self):
+		"""The settings may hold a file rather than a drawn mark; the consent has
+		to hold the image itself either way.
+
+		Pointing at the file would mean a form is only signed for as long as
+		that file is there and unchanged, and this is the record of who
+		countersigned a registration.
+		"""
+		png = base64.b64decode(MARK.split(",", 1)[1])
+		upload = frappe.get_doc(
+			{
+				"doctype": "File",
+				"file_name": "registrar-signature-for-tests.png",
+				"is_private": 0,
+				"content": png,
+			}
+		).insert(ignore_permissions=True)
+
+		self.give_the_registrar_a_signature(upload.file_url)
+		name = self.a_form()
+		forms.sign(name)
+
+		stamped = forms.form(name)["registrar_signature"]
+		self.assertTrue(stamped.startswith("data:image/png;base64,"), stamped[:40])
+		self.assertNotIn(upload.file_url, stamped)
+		self.assertGreater(ink(stamped), 0)
+
+	def test_a_missing_signature_file_is_said_so(self):
+		"""Rather than signing every form in the term with nothing on it."""
+		self.give_the_registrar_a_signature("/files/no-such-signature-for-tests.png")
+
+		with self.assertRaises(frappe.ValidationError):
+			forms.sign(self.a_form())
 
 	def test_the_name_is_stamped_on_rather_than_looked_up_later(self):
 		"""A form reprinted after the registrar changes has to still name the
@@ -191,29 +328,35 @@ class TestSigningForms(IntegrationTestCase):
 		self.assertEqual(len(detail["modules"]), enrolled)
 
 	def test_the_mark_reaches_the_printed_form(self):
-		"""The whole point. Unsigned it prints a line to sign by hand; signed it
-		prints the mark."""
-		self.give_the_registrar_a_signature()
+		"""Unsigned it prints a line to sign by hand; signed it prints the mark
+		and exactly one rule under it."""
+		self.give_the_registrar_a_signature(drawn(rule=True))
 		name = self.a_form()
 
 		before = frappe.get_print(
 			"Registration Consent", name, print_format="Proof of Registration"
 		)
-		self.assertNotIn(MARK, before)
 		self.assertIn("REGISTRAR", before.upper())
 
 		forms.sign(name)
+		stamped = forms.form(name)["registrar_signature"]
 
 		after = frappe.get_print(
 			"Registration Consent", name, print_format="Proof of Registration"
 		)
-		self.assertIn(MARK, after)
+		self.assertIn(stamped, after)
+		# One rule per signature block, and none of them a leftover blank.
+		self.assertEqual(
+			after.count('<div class="signature-rule">'),
+			after.count('class="proof-signature"'),
+		)
+		self.assertEqual(after.count('<div class="signature-space">'), 0)
 
 
 def run_tests(verbosity=2):
 	"""Run these from a console, since bench run-tests cannot bootstrap this site."""
 	suite = unittest.TestSuite()
 	loader = unittest.TestLoader()
-	for case in (TestSigningRoles, TestSigningForms):
+	for case in (TestTrimmingThePadsLine, TestSigningRoles, TestSigningForms):
 		suite.addTests(loader.loadTestsFromTestCase(case))
 	return unittest.TextTestRunner(verbosity=verbosity).run(suite)

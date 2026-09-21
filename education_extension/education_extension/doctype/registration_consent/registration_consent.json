@@ -23,6 +23,12 @@
   "signed_by_guardian",
   "guardian_name",
   "guardian_signature",
+  "registrar_section",
+  "registrar_signature",
+  "registrar_name",
+  "column_break_registrar",
+  "signed_by_registrar",
+  "registrar_signed_at",
   "text_section",
   "declaration_text",
   "consent_text"
@@ -146,6 +152,45 @@
    "read_only": 1
   },
   {
+   "fieldname": "registrar_section",
+   "fieldtype": "Section Break",
+   "label": "Registrar"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "registrar_signature",
+   "fieldtype": "Signature",
+   "label": "Registrar Signature",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "description": "The name printed beneath the signature, as it stood when it was signed.",
+   "fieldname": "registrar_name",
+   "fieldtype": "Data",
+   "label": "Registrar",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_registrar",
+   "fieldtype": "Column Break"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "signed_by_registrar",
+   "fieldtype": "Link",
+   "label": "Signed By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "registrar_signed_at",
+   "fieldtype": "Datetime",
+   "label": "Signed On",
+   "read_only": 1
+  },
+  {
    "fieldname": "text_section",
    "fieldtype": "Section Break",
    "label": "What Was Agreed To"
@@ -167,7 +212,7 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-09-07 09:00:00.000000",
+ "modified": "2026-09-21 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Education Extension",
  "name": "Registration Consent",

@@ -16,6 +16,7 @@
   "popia_consent",
   "proof_section",
   "registrar_name",
+  "registrar_signature",
   "debugging_section",
   "show_unverified_prerequisites"
  ],
@@ -85,6 +86,12 @@
    "label": "Registrar Name"
   },
   {
+   "description": "Drawn once and stamped onto each registration form as it is signed. Changing it does not alter forms already signed, which keep the mark that was on them at the time.",
+   "fieldname": "registrar_signature",
+   "fieldtype": "Signature",
+   "label": "Registrar Signature"
+  },
+  {
    "fieldname": "debugging_section",
    "fieldtype": "Section Break",
    "label": "Debugging"
@@ -100,7 +107,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-03 09:00:00.000000",
+ "modified": "2026-09-21 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Education Extension",
  "name": "Registration Settings",

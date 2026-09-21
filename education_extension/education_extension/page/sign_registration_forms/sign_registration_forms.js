@@ -21,16 +21,16 @@
  */
 
 frappe.pages['sign-registration-forms'].on_page_load = (wrapper) => {
-	new SigningQueue(wrapper);
-};
+	new SigningQueue(wrapper)
+}
 
-const API = 'education_extension.education_extension.registration_forms.';
+const API = 'education_extension.education_extension.registration_forms.'
 
 const STATES = [
 	{ value: 'unsigned', label: __('Still to sign') },
 	{ value: 'signed', label: __('Signed') },
 	{ value: 'all', label: __('All') },
-];
+]
 
 class SigningQueue {
 	constructor(wrapper) {
@@ -38,17 +38,17 @@ class SigningQueue {
 			parent: wrapper,
 			title: __('Sign Registration Forms'),
 			single_column: true,
-		});
-		this.rows = [];
-		this.counts = {};
-		this.selected = null;
-		this.state = 'unsigned';
-		this.term = null;
+		})
+		this.rows = []
+		this.counts = {}
+		this.selected = null
+		this.state = 'unsigned'
+		this.term = null
 
-		this.make_layout();
-		this.make_controls();
-		this.page.set_primary_action(__('Sign All Remaining'), () => this.sign_all());
-		this.refresh();
+		this.make_layout()
+		this.make_controls()
+		this.page.set_primary_action(__('Sign All Remaining'), () => this.sign_all())
+		this.refresh()
 	}
 
 	make_layout() {
@@ -64,18 +64,19 @@ class SigningQueue {
 				</div>
 				<div class="ee-form"></div>
 			</div>
-		`);
-		this.$toolbar = this.page.main.find('.ee-toolbar');
-		this.$states = this.page.main.find('.ee-states');
-		this.$list = this.page.main.find('.ee-queue-list');
-		this.$head = this.page.main.find('.ee-queue-head');
-		this.$form = this.page.main.find('.ee-form');
+		`)
+		this.$toolbar = this.page.main.find('.ee-toolbar')
+		this.$states = this.page.main.find('.ee-states')
+		this.$list = this.page.main.find('.ee-queue-list')
+		this.$head = this.page.main.find('.ee-queue-head')
+		this.$form = this.page.main.find('.ee-form')
 
 		frappe.dom.set_style(`
 			.ee-toolbar { display: flex; gap: 16px; align-items: flex-end;
-				margin-bottom: 12px; flex-wrap: wrap; }
+				margin-bottom: 12px; flex-wrap: wrap; margin-left: 10px;
+				margin-top: 5px; }
 			.ee-term { min-width: 260px; }
-			.ee-signing { display: flex; gap: 16px; align-items: flex-start; }
+			.ee-signing { display: flex; gap: 16px; align-items: flex-start; margin-left: 10px; }
 			.ee-queue { flex: 0 0 280px; border: 1px solid var(--border-color);
 				border-radius: var(--border-radius-md); overflow: hidden; }
 			.ee-queue-head { padding: 8px 12px; font-weight: 600;
@@ -95,7 +96,8 @@ class SigningQueue {
 				max-height: 90px; background: #fff; padding: 4px; }
 			.ee-muted { color: var(--text-muted); }
 			.ee-provisional { color: var(--orange-600); }
-		`);
+			.ee-states { margin-bottom: 1rem; }
+		`)
 	}
 
 	make_controls() {
@@ -107,14 +109,14 @@ class SigningQueue {
 				fieldtype: 'Link',
 				options: 'Academic Term',
 				change: () => {
-					this.term = this.term_field.get_value() || null;
-					this.refresh();
+					this.term = this.term_field.get_value() || null
+					this.refresh()
 				},
 			},
 			render_input: true,
-		});
+		})
 
-		this.render_states();
+		this.render_states()
 
 		// Open on the term being registered, the same one the reports default to.
 		frappe.db
@@ -125,28 +127,28 @@ class SigningQueue {
 			})
 			.then((periods) => {
 				if (periods && periods.length) {
-					this.term_field.set_value(periods[0].academic_term);
+					this.term_field.set_value(periods[0].academic_term)
 				}
-			});
+			})
 	}
 
 	render_states() {
-		this.$states.empty();
+		this.$states.empty()
 		STATES.forEach((state) => {
-			const count = this.counts[state.value];
-			const label = count === undefined ? state.label : `${state.label} (${count})`;
+			const count = this.counts[state.value]
+			const label = count === undefined ? state.label : `${state.label} (${count})`
 			$(
 				`<button class="btn btn-sm ${
 					this.state === state.value ? 'btn-primary' : 'btn-default'
-				}">${label}</button>`
+				}">${label}</button>`,
 			)
 				.appendTo(this.$states)
 				.on('click', () => {
-					this.state = state.value;
-					this.render_states();
-					this.refresh();
-				});
-		});
+					this.state = state.value
+					this.render_states()
+					this.refresh()
+				})
+		})
 	}
 
 	refresh() {
@@ -155,30 +157,32 @@ class SigningQueue {
 		frappe
 			.call({ method: API + 'forms', args: { academic_term: this.term, state: 'all' } })
 			.then((r) => {
-				const all = r.message || [];
+				const all = r.message || []
 				this.counts = {
 					unsigned: all.filter((row) => !row.signed).length,
 					signed: all.filter((row) => row.signed).length,
 					all: all.length,
-				};
+				}
 				this.rows =
-					this.state === 'all' ? all : all.filter((row) => row.signed === (this.state === 'signed'));
+					this.state === 'all'
+						? all
+						: all.filter((row) => row.signed === (this.state === 'signed'))
 
-				this.render_states();
-				this.render_list();
+				this.render_states()
+				this.render_list()
 
-				const still = this.rows.find((row) => row.name === this.selected);
-				this.select(still ? still.name : (this.rows[0] || {}).name);
-			});
+				const still = this.rows.find((row) => row.name === this.selected)
+				this.select(still ? still.name : (this.rows[0] || {}).name)
+			})
 	}
 
 	render_list() {
-		const state = STATES.find((s) => s.value === this.state);
-		this.$head.text(`${state.label} (${this.rows.length})`);
+		const state = STATES.find((s) => s.value === this.state)
+		this.$head.text(`${state.label} (${this.rows.length})`)
 
 		if (!this.rows.length) {
-			this.$list.html(`<div class="ee-queue-row ee-muted">${__('Nothing here.')}</div>`);
-			return;
+			this.$list.html(`<div class="ee-queue-row ee-muted">${__('Nothing here.')}</div>`)
+			return
 		}
 
 		this.$list.html(
@@ -190,32 +194,32 @@ class SigningQueue {
 						<div class="ee-id">${frappe.utils.escape_html(row.student)}${
 							row.signed ? ' &middot; ' + __('signed') : ''
 						}</div>
-					</div>`
+					</div>`,
 				)
-				.join('')
-		);
+				.join(''),
+		)
 
 		this.$list.find('.ee-queue-row').on('click', (event) => {
-			this.select($(event.currentTarget).attr('data-name'));
-		});
+			this.select($(event.currentTarget).attr('data-name'))
+		})
 	}
 
 	select(name) {
-		this.selected = name;
-		this.$list.find('.ee-queue-row').removeClass('is-selected');
+		this.selected = name
+		this.$list.find('.ee-queue-row').removeClass('is-selected')
 		if (!name) {
-			this.$form.html(`<div class="ee-muted">${__('Select a form.')}</div>`);
-			return;
+			this.$form.html(`<div class="ee-muted">${__('Select a form.')}</div>`)
+			return
 		}
-		this.$list.find(`[data-name="${name}"]`).addClass('is-selected');
+		this.$list.find(`[data-name="${name}"]`).addClass('is-selected')
 
 		frappe.call({ method: API + 'form', args: { consent: name } }).then((r) => {
-			if (this.selected === name) this.render_form(r.message);
-		});
+			if (this.selected === name) this.render_form(r.message)
+		})
 	}
 
 	render_form(form) {
-		if (!form) return;
+		if (!form) return
 
 		const modules = form.modules.length
 			? `<table class="ee-modules">
@@ -230,18 +234,18 @@ class SigningQueue {
 										: ''
 								}</td>
 								<td>${frappe.utils.escape_html(row.program || '')}</td>
-							</tr>`
+							</tr>`,
 						)
 						.join('')}
 				</table>`
 			: `<p class="ee-muted">${__(
-					'No modules are registered against this consent. Worth looking at before signing.'
-			  )}</p>`;
+					'No modules are registered against this consent. Worth looking at before signing.',
+				)}</p>`
 
 		const signature = (mark, label) =>
 			mark
 				? `<div><img src="${mark}" class="ee-signature" /><div class="ee-id">${label}</div></div>`
-				: `<div class="ee-muted">${label}: ${__('not signed')}</div>`;
+				: `<div class="ee-muted">${label}: ${__('not signed')}</div>`
 
 		this.$form.html(`
 			<h4>${frappe.utils.escape_html(form.student_name || form.student)}
@@ -259,72 +263,72 @@ class SigningQueue {
 					form.signed_by_guardian
 						? signature(
 								form.guardian_signature,
-								frappe.utils.escape_html(form.guardian_name || __('Guardian'))
-						  )
+								frappe.utils.escape_html(form.guardian_name || __('Guardian')),
+							)
 						: ''
 				}
 				${signature(form.registrar_signature, __('Registrar'))}
 			</div>
 
 			<div class="ee-actions"></div>
-		`);
+		`)
 
-		const $actions = this.$form.find('.ee-actions');
+		const $actions = this.$form.find('.ee-actions')
 		if (form.signed) {
 			$(
 				`<div class="ee-muted">${__('Signed by {0} on {1}.', [
 					frappe.utils.escape_html(form.registrar_name || ''),
 					frappe.datetime.str_to_user(form.registrar_signed_at),
-				])}</div>`
-			).appendTo($actions);
+				])}</div>`,
+			).appendTo($actions)
 			$(
 				`<button class="btn btn-default btn-sm" style="margin-top:8px">${__(
-					'Remove Signature'
-				)}</button>`
+					'Remove Signature',
+				)}</button>`,
 			)
 				.appendTo($actions)
-				.on('click', () => this.unsign(form.name));
+				.on('click', () => this.unsign(form.name))
 		} else {
 			$(`<button class="btn btn-primary btn-sm">${__('Sign')}</button>`)
 				.appendTo($actions)
-				.on('click', () => this.sign(form.name));
+				.on('click', () => this.sign(form.name))
 			$(`<button class="btn btn-default btn-sm" style="margin-left:8px">${__('Skip')}</button>`)
 				.appendTo($actions)
-				.on('click', () => this.advance());
+				.on('click', () => this.advance())
 		}
 	}
 
 	/* Where to go after signing: the next one down, so a queue can be worked
 	 * through without going back to the list each time. */
 	advance() {
-		const at = this.rows.findIndex((row) => row.name === this.selected);
-		const next = this.rows[at + 1] || this.rows[at - 1];
-		this.select(next ? next.name : null);
+		const at = this.rows.findIndex((row) => row.name === this.selected)
+		const next = this.rows[at + 1] || this.rows[at - 1]
+		this.select(next ? next.name : null)
 	}
 
 	sign(name) {
 		frappe.call({ method: API + 'sign', args: { consent: name } }).then(() => {
-			frappe.show_alert({ message: __('Signed'), indicator: 'green' });
-			const after = this.rows[this.rows.findIndex((row) => row.name === name) + 1];
-			this.selected = after ? after.name : null;
-			this.refresh();
-		});
+			frappe.show_alert({ message: __('Signed'), indicator: 'green' })
+			const after = this.rows[this.rows.findIndex((row) => row.name === name) + 1]
+			this.selected = after ? after.name : null
+			this.refresh()
+		})
 	}
 
 	unsign(name) {
 		frappe.confirm(__('Take the registrar signature off this form?'), () => {
 			frappe.call({ method: API + 'unsign', args: { consent: name } }).then(() => {
-				frappe.show_alert({ message: __('Signature removed'), indicator: 'orange' });
-				this.refresh();
-			});
-		});
+				frappe.show_alert({ message: __('Signature removed'), indicator: 'orange' })
+				this.refresh()
+			})
+		})
 	}
 
 	sign_all() {
-		const waiting = this.counts.unsigned || 0;
+		const waiting = this.counts.unsigned || 0
 		if (!waiting) {
-			frappe.msgprint(__('There is nothing left to sign here.'));
-			return;
+			frappe.msgprint(__('There is nothing left to sign here.'))
+			return
 		}
 
 		frappe.confirm(__('Sign all {0} remaining forms?', [waiting]), () => {
@@ -334,11 +338,11 @@ class SigningQueue {
 				freeze: true,
 				freeze_message: __('Signing {0} forms...', [waiting]),
 				callback: (r) => {
-					const out = r.message || { signed: [], problems: [] };
+					const out = r.message || { signed: [], problems: [] }
 					frappe.show_alert({
 						message: __('{0} signed', [out.signed.length]),
 						indicator: 'green',
-					});
+					})
 					if (out.problems.length) {
 						frappe.msgprint({
 							title: __('Some forms were not signed'),
@@ -347,15 +351,15 @@ class SigningQueue {
 								.map(
 									(p) =>
 										`${frappe.utils.escape_html(p.consent)}: ${frappe.utils.escape_html(
-											p.reason
-										)}`
+											p.reason,
+										)}`,
 								)
 								.join('<br>'),
-						});
+						})
 					}
-					this.refresh();
+					this.refresh()
 				},
-			});
-		});
+			})
+		})
 	}
 }

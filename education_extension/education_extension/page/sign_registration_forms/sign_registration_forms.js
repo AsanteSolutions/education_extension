@@ -8,6 +8,13 @@
  * is that job done once through: the forms still to sign down the left, the one
  * in hand on the right with the modules it covers, and a button.
  *
+ * The controls are built into the page body rather than added to the page's own
+ * filter bar. That bar is easy to miss and turned out to be — the first version
+ * put "Still to sign / Signed / All" there and it read as though there were no
+ * way to see a form once it had been signed. Here they are three buttons
+ * carrying their own counts, which also answers "how many are left" without
+ * anyone having to ask.
+ *
  * The list is deliberately light — names and dates only. Each drawn signature
  * is tens of kilobytes, and a term is a couple of hundred forms, so the one on
  * screen is fetched on its own.
@@ -19,6 +26,12 @@ frappe.pages['sign-registration-forms'].on_page_load = (wrapper) => {
 
 const API = 'education_extension.education_extension.registration_forms.';
 
+const STATES = [
+	{ value: 'unsigned', label: __('Still to sign') },
+	{ value: 'signed', label: __('Signed') },
+	{ value: 'all', label: __('All') },
+];
+
 class SigningQueue {
 	constructor(wrapper) {
 		this.page = frappe.ui.make_app_page({
@@ -27,52 +40,23 @@ class SigningQueue {
 			single_column: true,
 		});
 		this.rows = [];
+		this.counts = {};
 		this.selected = null;
+		this.state = 'unsigned';
+		this.term = null;
 
-		this.make_filters();
 		this.make_layout();
+		this.make_controls();
 		this.page.set_primary_action(__('Sign All Remaining'), () => this.sign_all());
 		this.refresh();
 	}
 
-	make_filters() {
-		this.term = this.page.add_field({
-			fieldname: 'academic_term',
-			label: __('Academic Term'),
-			fieldtype: 'Link',
-			options: 'Academic Term',
-			change: () => this.refresh(),
-		});
-
-		this.state = this.page.add_field({
-			fieldname: 'state',
-			label: __('Show'),
-			fieldtype: 'Select',
-			options: [
-				{ value: 'unsigned', label: __('Still to sign') },
-				{ value: 'signed', label: __('Signed') },
-				{ value: 'all', label: __('All') },
-			],
-			default: 'unsigned',
-			change: () => this.refresh(),
-		});
-
-		// Open on the term being registered, the same one the reports default to.
-		frappe.db
-			.get_list('Registration Period', {
-				fields: ['academic_term'],
-				order_by: 'opens_on desc',
-				limit: 1,
-			})
-			.then((periods) => {
-				if (periods && periods.length) {
-					this.term.set_value(periods[0].academic_term);
-				}
-			});
-	}
-
 	make_layout() {
 		this.page.main.html(`
+			<div class="ee-toolbar">
+				<div class="ee-term"></div>
+				<div class="ee-states btn-group"></div>
+			</div>
 			<div class="ee-signing">
 				<div class="ee-queue">
 					<div class="ee-queue-head"></div>
@@ -81,11 +65,16 @@ class SigningQueue {
 				<div class="ee-form"></div>
 			</div>
 		`);
+		this.$toolbar = this.page.main.find('.ee-toolbar');
+		this.$states = this.page.main.find('.ee-states');
 		this.$list = this.page.main.find('.ee-queue-list');
 		this.$head = this.page.main.find('.ee-queue-head');
 		this.$form = this.page.main.find('.ee-form');
 
 		frappe.dom.set_style(`
+			.ee-toolbar { display: flex; gap: 16px; align-items: flex-end;
+				margin-bottom: 12px; flex-wrap: wrap; }
+			.ee-term { min-width: 260px; }
 			.ee-signing { display: flex; gap: 16px; align-items: flex-start; }
 			.ee-queue { flex: 0 0 280px; border: 1px solid var(--border-color);
 				border-radius: var(--border-radius-md); overflow: hidden; }
@@ -109,29 +98,86 @@ class SigningQueue {
 		`);
 	}
 
-	refresh() {
-		const args = {
-			academic_term: this.term.get_value() || undefined,
-			state: this.state.get_value() || 'unsigned',
-		};
-		frappe.call({ method: API + 'forms', args }).then((r) => {
-			this.rows = r.message || [];
-			this.render_list();
-			// Keep the reader where they were if that form is still listed,
-			// otherwise start at the top.
-			const still = this.rows.find((row) => row.name === this.selected);
-			this.select(still ? still.name : (this.rows[0] || {}).name);
+	make_controls() {
+		this.term_field = frappe.ui.form.make_control({
+			parent: this.$toolbar.find('.ee-term'),
+			df: {
+				fieldname: 'academic_term',
+				label: __('Academic Term'),
+				fieldtype: 'Link',
+				options: 'Academic Term',
+				change: () => {
+					this.term = this.term_field.get_value() || null;
+					this.refresh();
+				},
+			},
+			render_input: true,
+		});
+
+		this.render_states();
+
+		// Open on the term being registered, the same one the reports default to.
+		frappe.db
+			.get_list('Registration Period', {
+				fields: ['academic_term'],
+				order_by: 'opens_on desc',
+				limit: 1,
+			})
+			.then((periods) => {
+				if (periods && periods.length) {
+					this.term_field.set_value(periods[0].academic_term);
+				}
+			});
+	}
+
+	render_states() {
+		this.$states.empty();
+		STATES.forEach((state) => {
+			const count = this.counts[state.value];
+			const label = count === undefined ? state.label : `${state.label} (${count})`;
+			$(
+				`<button class="btn btn-sm ${
+					this.state === state.value ? 'btn-primary' : 'btn-default'
+				}">${label}</button>`
+			)
+				.appendTo(this.$states)
+				.on('click', () => {
+					this.state = state.value;
+					this.render_states();
+					this.refresh();
+				});
 		});
 	}
 
+	refresh() {
+		// Every state, so the buttons can carry counts and the reader can see
+		// at a glance that signed forms have not gone anywhere.
+		frappe
+			.call({ method: API + 'forms', args: { academic_term: this.term, state: 'all' } })
+			.then((r) => {
+				const all = r.message || [];
+				this.counts = {
+					unsigned: all.filter((row) => !row.signed).length,
+					signed: all.filter((row) => row.signed).length,
+					all: all.length,
+				};
+				this.rows =
+					this.state === 'all' ? all : all.filter((row) => row.signed === (this.state === 'signed'));
+
+				this.render_states();
+				this.render_list();
+
+				const still = this.rows.find((row) => row.name === this.selected);
+				this.select(still ? still.name : (this.rows[0] || {}).name);
+			});
+	}
+
 	render_list() {
-		const label = this.state.get_value() === 'signed' ? __('Signed') : __('To sign');
-		this.$head.text(`${label} (${this.rows.length})`);
+		const state = STATES.find((s) => s.value === this.state);
+		this.$head.text(`${state.label} (${this.rows.length})`);
 
 		if (!this.rows.length) {
-			this.$list.html(
-				`<div class="ee-queue-row ee-muted">${__('Nothing here.')}</div>`
-			);
+			this.$list.html(`<div class="ee-queue-row ee-muted">${__('Nothing here.')}</div>`);
 			return;
 		}
 
@@ -209,7 +255,14 @@ class SigningQueue {
 			<h5>${__('Signatures')}</h5>
 			<div style="display:flex; gap:24px; flex-wrap:wrap; margin-bottom:16px">
 				${signature(form.student_signature, __('Student'))}
-				${form.signed_by_guardian ? signature(form.guardian_signature, frappe.utils.escape_html(form.guardian_name || __('Guardian'))) : ''}
+				${
+					form.signed_by_guardian
+						? signature(
+								form.guardian_signature,
+								frappe.utils.escape_html(form.guardian_name || __('Guardian'))
+						  )
+						: ''
+				}
 				${signature(form.registrar_signature, __('Registrar'))}
 			</div>
 
@@ -224,7 +277,11 @@ class SigningQueue {
 					frappe.datetime.str_to_user(form.registrar_signed_at),
 				])}</div>`
 			).appendTo($actions);
-			$(`<button class="btn btn-default btn-sm" style="margin-top:8px">${__('Remove Signature')}</button>`)
+			$(
+				`<button class="btn btn-default btn-sm" style="margin-top:8px">${__(
+					'Remove Signature'
+				)}</button>`
+			)
 				.appendTo($actions)
 				.on('click', () => this.unsign(form.name));
 		} else {
@@ -264,42 +321,41 @@ class SigningQueue {
 	}
 
 	sign_all() {
-		const waiting = this.rows.filter((row) => !row.signed);
-		if (!waiting.length) {
+		const waiting = this.counts.unsigned || 0;
+		if (!waiting) {
 			frappe.msgprint(__('There is nothing left to sign here.'));
 			return;
 		}
 
-		frappe.confirm(
-			__('Sign all {0} remaining forms?', [waiting.length]),
-			() => {
-				frappe.call({
-					method: API + 'sign_all',
-					args: { names: waiting.map((row) => row.name) },
-					freeze: true,
-					freeze_message: __('Signing {0} forms...', [waiting.length]),
-					callback: (r) => {
-						const out = r.message || { signed: [], problems: [] };
-						frappe.show_alert({
-							message: __('{0} signed', [out.signed.length]),
-							indicator: 'green',
+		frappe.confirm(__('Sign all {0} remaining forms?', [waiting]), () => {
+			frappe.call({
+				method: API + 'sign_all',
+				args: { academic_term: this.term },
+				freeze: true,
+				freeze_message: __('Signing {0} forms...', [waiting]),
+				callback: (r) => {
+					const out = r.message || { signed: [], problems: [] };
+					frappe.show_alert({
+						message: __('{0} signed', [out.signed.length]),
+						indicator: 'green',
+					});
+					if (out.problems.length) {
+						frappe.msgprint({
+							title: __('Some forms were not signed'),
+							indicator: 'orange',
+							message: out.problems
+								.map(
+									(p) =>
+										`${frappe.utils.escape_html(p.consent)}: ${frappe.utils.escape_html(
+											p.reason
+										)}`
+								)
+								.join('<br>'),
 						});
-						if (out.problems.length) {
-							frappe.msgprint({
-								title: __('Some forms were not signed'),
-								indicator: 'orange',
-								message: out.problems
-									.map(
-										(p) =>
-											`${frappe.utils.escape_html(p.consent)}: ${frappe.utils.escape_html(p.reason)}`
-									)
-									.join('<br>'),
-							});
-						}
-						this.refresh();
-					},
-				});
-			}
-		);
+					}
+					this.refresh();
+				},
+			});
+		});
 	}
 }

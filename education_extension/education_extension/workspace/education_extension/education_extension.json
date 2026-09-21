@@ -18,7 +18,7 @@
    "icon": "user-round-plus",
    "is_query_report": 0,
    "label": "Registration",
-   "link_count": 4,
+   "link_count": 5,
    "onboard": 0,
    "type": "Card Break"
   },
@@ -51,6 +51,17 @@
    "label": "Registration Status",
    "link_count": 0,
    "link_to": "Registration Status",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Module Registrations",
+   "link_count": 0,
+   "link_to": "Module Registrations",
    "link_type": "Report",
    "onboard": 0,
    "type": "Link"
@@ -195,7 +206,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-09-10 11:00:00.000000",
+ "modified": "2026-09-21 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Education Extension",
  "name": "Education Extension",

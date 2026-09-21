@@ -55,7 +55,31 @@ def apply_desk_records():
 	# The sidebar first: the icon links to it.
 	ensure_standard_record("Workspace Sidebar", "workspace_sidebar")
 	ensure_standard_record("Desktop Icon", "desktop_icon")
+	fill_in_our_own_sidebar()
 	add_to_education_workspace()
+
+
+def fill_in_our_own_sidebar():
+	"""Bring this app's own sidebar up to date with its own page.
+
+	`ensure_standard_record` only creates, it does not update, so a link added to
+	the workspace after a site was installed would turn up on the page and not in
+	the sidebar beside it — and the two are meant to be the same page seen twice.
+
+	Read off the workspace rather than the sidebar's own file, for the reason the
+	Education copy is: the page is the one description of what this app offers,
+	and a second list is only somewhere for the two to disagree.
+	"""
+	cards = _cards()
+	if not cards:
+		return
+
+	with _without_writing_to_the_source_tree():
+		added = _add_sidebar_items(cards, SOURCE)
+
+	if added:
+		frappe.clear_cache()
+		print("Education Extension: added {0} sidebar items".format(added))
 
 
 def ensure_standard_record(doctype, folder):
@@ -352,13 +376,14 @@ def _block_id(label):
 	return "ee-" + label.lower().replace(" ", "-")
 
 
-def _add_sidebar_items(cards):
-	if not frappe.db.exists("Workspace Sidebar", TARGET):
+def _add_sidebar_items(cards, name=TARGET):
+	"""Add this app's links to a sidebar, whether the education app's or its own."""
+	if not frappe.db.exists("Workspace Sidebar", name):
 		# Frappe generates one from the workspace shortcuts if it is missing; there
 		# is nothing to append to until it does.
 		return 0
 
-	sidebar = frappe.get_doc("Workspace Sidebar", TARGET)
+	sidebar = frappe.get_doc("Workspace Sidebar", name)
 	# A link already somewhere in the sidebar is left where it is, so this never
 	# competes with the education app over where something belongs.
 	linked = {row.link_to for row in sidebar.items if row.type == "Link"}

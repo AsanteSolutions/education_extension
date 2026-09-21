@@ -1201,6 +1201,126 @@ class TestCorequisitesAtSubmission(UnitTestCase):
 		self.assertEqual(reg.unmet_corequisites([self.COURSE], {self.COURSE}, {}, rules), [])
 
 
+
+class TestModuleRegistrationsShape(UnitTestCase):
+	"""The report's columns and who may read it. No database."""
+
+	def columns(self):
+		from education_extension.education_extension.report.module_registrations import (
+			module_registrations,
+		)
+
+		return module_registrations.columns()
+
+	def test_every_column_is_fully_described(self):
+		"""A column with no fieldtype renders as text, and a Link with no options
+		renders as text that looks clickable and is not."""
+		for column in self.columns():
+			with self.subTest(column=column.get("fieldname")):
+				self.assertTrue(column.get("label"))
+				self.assertTrue(column.get("fieldname"))
+				self.assertTrue(column.get("fieldtype"))
+				if column["fieldtype"] == "Link":
+					self.assertTrue(column.get("options"), column["fieldname"])
+
+	def test_no_column_is_declared_twice(self):
+		fieldnames = [column["fieldname"] for column in self.columns()]
+		self.assertEqual(len(fieldnames), len(set(fieldnames)))
+
+	def test_it_answers_to_the_same_people_as_the_other_registration_report(self):
+		"""Both list the cohort by name. A module register that admitted a wider
+		audience than Registration Status would be the quiet way round it."""
+		import json
+		import os
+
+		base = os.path.join(os.path.dirname(reg.__file__), "report")
+		roles = {}
+		for name in ("registration_status", "module_registrations"):
+			with open(os.path.join(base, name, "{0}.json".format(name))) as handle:
+				roles[name] = {row["role"] for row in json.load(handle)["roles"]}
+
+		self.assertEqual(roles["module_registrations"], roles["registration_status"])
+
+
+class TestModuleRegistrations(IntegrationTestCase):
+	"""The roll for one module."""
+
+	def report(self):
+		from education_extension.education_extension.report.module_registrations import (
+			module_registrations,
+		)
+
+		return module_registrations
+
+	def busiest(self):
+		"""The module with the most registrations, or skip."""
+		rows = frappe.db.sql(
+			"""
+			select pec.course as course, pe.academic_term as academic_term, count(*) as taken
+			from `tabProgram Enrollment Course` pec
+			join `tabProgram Enrollment` pe on pe.name = pec.parent
+			where pe.docstatus = 1
+			group by pec.course, pe.academic_term
+			order by taken desc
+			limit 1
+			""",
+			as_dict=True,
+		)
+		if not rows:
+			self.skipTest("no submitted registrations on this site")
+		return rows[0]
+
+	def test_a_module_must_be_chosen(self):
+		"""Without one this is every registration on the site, which is not a
+		question anybody asked."""
+		with self.assertRaises(frappe.ValidationError):
+			self.report().execute({})
+
+	def test_it_lists_everyone_registered_for_the_module(self):
+		busiest = self.busiest()
+		_columns, rows = self.report().execute(
+			{"course": busiest.course, "academic_term": busiest.academic_term}
+		)
+		self.assertEqual(len(rows), busiest.taken)
+		self.assertTrue(all(row["academic_term"] == busiest.academic_term for row in rows))
+
+	def test_it_lists_nobody_for_a_term_the_module_did_not_run_in(self):
+		busiest = self.busiest()
+		_columns, rows = self.report().execute(
+			{"course": busiest.course, "academic_term": "no-such-term-for-tests"}
+		)
+		self.assertEqual(rows, [])
+
+	def test_a_draft_registration_is_not_one(self):
+		"""Only submitted enrolments count, the same as everywhere else."""
+		busiest = self.busiest()
+		_columns, rows = self.report().execute({"course": busiest.course})
+		submitted = {
+			row.name
+			for row in frappe.get_all(
+				"Program Enrollment", filters={"docstatus": 1}, fields=["name"]
+			)
+		}
+		self.assertTrue(all(row["enrollment"] in submitted for row in rows))
+
+	def test_the_roll_reads_the_same_way_as_the_mark_sheet(self):
+		"""Two orderings of the same people is a difference someone spends a
+		while checking before concluding it means nothing."""
+		from education_extension.education_extension.doctype.marking_settings.marking_settings import (
+			order_students,
+		)
+
+		busiest = self.busiest()
+		_columns, rows = self.report().execute(
+			{"course": busiest.course, "academic_term": busiest.academic_term}
+		)
+		if len(rows) < 2:
+			self.skipTest("too few registrations to order")
+
+		students = list(dict.fromkeys(row["student"] for row in rows))
+		self.assertEqual(students, order_students(students))
+
+
 def run_tests(verbosity=2):
 	"""Run these from a console, since bench run-tests cannot bootstrap this site."""
 	suite = unittest.TestSuite()
@@ -1212,6 +1332,8 @@ def run_tests(verbosity=2):
 		TestRegistrationPeriod,
 		TestCarryOversStayOptional,
 		TestCorequisitesAtSubmission,
+		TestModuleRegistrationsShape,
+		TestModuleRegistrations,
 	):
 		suite.addTests(loader.loadTestsFromTestCase(case))
 	return unittest.TextTestRunner(verbosity=verbosity).run(suite)

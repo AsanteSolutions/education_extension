@@ -204,8 +204,20 @@ def _without_writing_to_the_source_tree():
 
 
 def _exists(link_to, link_type):
-	"""Whether the target is actually installed, so a link never dangles."""
-	doctype = "Report" if link_type == "Report" else "DocType"
+	"""Whether the target is actually installed, so a link never dangles.
+
+	A Workspace Link's `link_type` is the name of the doctype holding what it
+	points at — DocType, Page, Report, Dashboard — so it is the doctype to look
+	in. This used to treat everything that was not a Report as a DocType, which
+	meant a Page or Dashboard link was looked for among doctypes, not found, and
+	quietly left off the copy on the Education page: present on one page and
+	missing from the other, with nothing to say why.
+	"""
+	if link_type == "URL":
+		# Points outside the site; there is nothing here to check it against.
+		return True
+
+	doctype = link_type if frappe.db.exists("DocType", link_type) else "DocType"
 	return bool(frappe.db.exists(doctype, link_to))
 
 

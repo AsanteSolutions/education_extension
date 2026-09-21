@@ -90,6 +90,17 @@
    "collapsible": 1,
    "indent": 0,
    "keep_closed": 0,
+   "label": "Sign Registration Forms",
+   "link_to": "sign-registration-forms",
+   "link_type": "Page",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 1,
+   "collapsible": 1,
+   "indent": 0,
+   "keep_closed": 0,
    "label": "Registration Settings",
    "link_to": "Registration Settings",
    "link_type": "DocType",
@@ -229,7 +240,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-09-21 10:00:00.000000",
+ "modified": "2026-09-21 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Education Extension",
  "name": "Education Extension",

@@ -72,12 +72,13 @@ class TestAppPage(IntegrationTestCase):
 		workspace = frappe.get_doc("Workspace", desk.SOURCE)
 		sidebar = frappe.get_doc("Workspace Sidebar", desk.SOURCE)
 		on_page = {row.link_to for row in workspace.links if row.type == "Link"}
-		# Doctypes and reports only. The sidebar also carries navigation the page
-		# has no equivalent of: its own Home link, and the dashboard.
+		# Everything the page can also carry. The sidebar has navigation the page
+		# has no equivalent of — its own Home link, and the dashboard — so those
+		# link types are left out of the comparison rather than the links.
 		in_sidebar = {
 			row.link_to
 			for row in sidebar.items
-			if row.type == "Link" and row.link_type in ("DocType", "Report")
+			if row.type == "Link" and row.link_type in ("DocType", "Report", "Page")
 		}
 		self.assertEqual(on_page, in_sidebar)
 

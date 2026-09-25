@@ -55,11 +55,11 @@
   {
    "default": "Most recent academic year",
    "depends_on": "block_on_failed_modules",
-   "description": "How much of the record is counted. Most recent academic year: only the year the student last has results for, so a bad year is not held against them for ever. Whole record: every module they have ever taken.",
+   "description": "How much of the record is counted. Most recent semester: only the semester the student last has results for — the tightest, and the one that matches how often they register. Most recent academic year: the year they last have results for, so one bad semester is weighed against the other. Whole record: every module they have ever taken. In each case it is the latest period the student actually has results in, so sitting a semester out does not produce an empty window.",
    "fieldname": "failure_window",
    "fieldtype": "Select",
    "label": "Counted Over",
-   "options": "Most recent academic year\nWhole record"
+   "options": "Most recent semester\nMost recent academic year\nWhole record"
   },
   {
    "default": "0",
@@ -151,7 +151,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-25 09:00:00.000000",
+ "modified": "2026-09-25 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "Education Extension",
  "name": "Registration Settings",

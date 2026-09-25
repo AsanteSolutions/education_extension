@@ -49,8 +49,14 @@ How much of the record the two thresholds are measured against.
 
 | Option | Behaviour |
 |---|---|
-| **Most recent academic year** *(default)* | Only the year the student last has results for, so a bad year is not held against them for ever. |
+| **Most recent semester** | Only the semester the student last has results for. The tightest of the three, and the one that matches how often students register. |
+| **Most recent academic year** *(default)* | The year they last have results for, so one bad semester is weighed against the other and a bad year is not held against them for ever. |
 | **Whole record** | Every module they have ever taken. |
+
+The two narrow windows land on the latest period the student **actually has
+results in**, not the latest one on the calendar. A student who sat a semester
+out is judged on the last semester they were there for, rather than on an empty
+window that would read as nought failures out of nought.
 
 Two things are counted the way a registrar would count them rather than the way
 the database stores them, and both matter:

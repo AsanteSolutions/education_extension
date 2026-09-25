@@ -41,6 +41,17 @@ semester of next year.
 while there is money outstanding. If yours has, the page tells you the amount
 and nothing can be ticked until it is settled with the finance office.
 
+**If you have failed too much.** Some colleges also switch on a rule that stops
+a student registering when too much of what they have taken has been failed. If
+it has stopped you, the page says so and gives you the figures — how many of how
+many modules, which ones, and how many are still waiting on a result. Modules
+still waiting are not counted as failures.
+
+Check those figures. A module whose result was never entered counts as nothing
+at all, not as a pass, so a gap in the college's records can put you here
+wrongly. Either way the next step is the same: speak to the academic office.
+They can let you register, and you will be told as soon as they have.
+
 ### Step 2 — the declarations
 
 Before your registration is final you are shown two things to agree to:

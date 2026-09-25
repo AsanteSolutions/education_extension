@@ -24,6 +24,49 @@ finds nothing at all — not a pass, not a fail, nothing. What should happen?
 > from everything**, because the system has no history to check against. This
 > is the single most likely way to make registration appear broken.
 
+### Failed Modules Block Registration
+
+Off by default. Turn it on to refuse registration to a student who has failed
+too much of what they have taken.
+
+> Leave this off until your results are complete in this system. Counted against
+> a partial record it excludes students over results that were simply never
+> captured — the same trap as the prerequisite setting above, and for the same
+> reason.
+
+Two thresholds sit under it, and **either one** is enough to block a student.
+Leave a threshold at 0 to switch that half of the rule off; with both at 0
+nobody is blocked, whatever the tick box says.
+
+| Setting | Blocks a student who has |
+|---|---|
+| **Modules Failed** | failed this many modules or more |
+| **Percentage Failed** | failed this percentage of the modules they took or more |
+
+### Counted Over
+
+How much of the record the two thresholds are measured against.
+
+| Option | Behaviour |
+|---|---|
+| **Most recent academic year** *(default)* | Only the year the student last has results for, so a bad year is not held against them for ever. |
+| **Whole record** | Every module they have ever taken. |
+
+Two things are counted the way a registrar would count them rather than the way
+the database stores them, and both matter:
+
+- A module is counted **once**, by its best outcome. Failed in one year and
+  passed in the next, it is a pass — nobody is excluded over a module they have
+  since passed.
+- A module **waiting on a supplementary or aegrotat result** counts as taken and
+  *not* as failed. Supplementary results land around the time the next term
+  opens, so without this a student carrying one settled fail among four pending
+  modules would read as having failed 100% of them.
+
+A student the rule turns away is told the figures — how many of how many, which
+modules, and how many are still awaiting a result — so they can tell whether
+something has been miscounted.
+
 ### Outstanding Fees Block Registration
 
 Off by default. Turn it on to refuse registration to a student who owes money.

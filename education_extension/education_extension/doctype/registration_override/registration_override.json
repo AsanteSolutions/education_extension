@@ -1,0 +1,207 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "EDU-EXT-OVERRIDE-.YYYY.-.#####",
+ "creation": "2026-09-25 09:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "student",
+  "student_name",
+  "academic_term",
+  "academic_year",
+  "column_break_granted",
+  "granted_by",
+  "granted_on",
+  "amended_from",
+  "decision_section",
+  "reason",
+  "conditions",
+  "standing_section",
+  "modules_failed",
+  "modules_attempted",
+  "column_break_standing",
+  "failure_rate",
+  "failed_modules"
+ ],
+ "fields": [
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Student",
+   "options": "Student",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fetch_from": "student.student_name",
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Student Name",
+   "read_only": 1
+  },
+  {
+   "description": "The term this permission covers. It does not carry into the next one: a decision taken on one term's results has to be taken again against the next.",
+   "fieldname": "academic_term",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Academic Term",
+   "options": "Academic Term",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fetch_from": "academic_term.academic_year",
+   "fieldname": "academic_year",
+   "fieldtype": "Link",
+   "label": "Academic Year",
+   "options": "Academic Year",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_granted",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "granted_by",
+   "fieldtype": "Link",
+   "label": "Granted By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "granted_on",
+   "fieldtype": "Datetime",
+   "label": "Granted On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Registration Override",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "decision_section",
+   "fieldtype": "Section Break",
+   "label": "Decision"
+  },
+  {
+   "description": "Why this student is being allowed to register despite their results. Part of the record: the next person to look at this student should be able to see what was decided and on what grounds.",
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "Reason",
+   "reqd": 1
+  },
+  {
+   "description": "Anything the student has been told they must do. Recorded here for the next registrar to read; nothing enforces it.",
+   "fieldname": "conditions",
+   "fieldtype": "Small Text",
+   "label": "Conditions"
+  },
+  {
+   "collapsible": 1,
+   "description": "The student's record as it stood when this was granted, filled in automatically. Kept because results change afterwards, and a decision has to be readable against what was in front of the person who took it.",
+   "fieldname": "standing_section",
+   "fieldtype": "Section Break",
+   "label": "Academic Standing When Granted"
+  },
+  {
+   "fieldname": "modules_failed",
+   "fieldtype": "Int",
+   "label": "Modules Failed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "modules_attempted",
+   "fieldtype": "Int",
+   "label": "Modules Attempted",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_standing",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "failure_rate",
+   "fieldtype": "Percent",
+   "label": "Failure Rate",
+   "read_only": 1
+  },
+  {
+   "fieldname": "failed_modules",
+   "fieldtype": "Small Text",
+   "label": "Which Modules",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-09-25 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Education Extension",
+ "name": "Registration Override",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Education Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Academics User",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "student_name"
+}

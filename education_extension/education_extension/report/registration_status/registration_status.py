@@ -16,18 +16,25 @@ and need a person, and a comment on a submitted enrolment is not a queue.
 import frappe
 from frappe import _
 
-from education_extension.education_extension.registration import (
-	programs_by_block,
-	term_ordinal,
-)
+from education_extension.education_extension.academic_standing import rule, standing_for
 from education_extension.education_extension.doctype.student_progress_report.student_progress_report import (
 	_program_semester,
 	_semester_label,
+)
+from education_extension.education_extension.registration import (
+	programs_by_block,
+	term_ordinal,
 )
 
 REGISTERED = "Registered"
 NOT_REGISTERED = "Not registered"
 NOT_THIS_TERM = "Not their term"
+
+# Only for a student the academic standing rule has something to say about, so
+# the column is empty for everyone it is fine with -- and for everyone, all of
+# it, where the institution has not turned the rule on.
+CANNOT_REGISTER = "Cannot register"
+ALLOWED_ANYWAY = "Allowed anyway"
 
 
 def execute(filters=None):
@@ -43,6 +50,7 @@ def columns():
 		{"label": _("Student"), "fieldname": "student", "fieldtype": "Link", "options": "Student", "width": 110},
 		{"label": _("Name"), "fieldname": "student_name", "fieldtype": "Data", "width": 200},
 		{"label": _("Status"), "fieldname": "status", "fieldtype": "Data", "width": 120},
+		{"label": _("Standing"), "fieldname": "standing", "fieldtype": "Data", "width": 130},
 		{"label": _("Due to Take"), "fieldname": "expected", "fieldtype": "Data", "width": 160},
 		{"label": _("Registered For"), "fieldname": "programs", "fieldtype": "Data", "width": 200},
 		{"label": _("Modules"), "fieldname": "modules", "fieldtype": "Int", "width": 90},
@@ -67,6 +75,8 @@ def rows(filters):
 		order_by="name asc",
 	)
 
+	standings = standing_labels([student.name for student in students], term)
+
 	out = []
 	for student in students:
 		registered = this_term.get(student.name)
@@ -89,6 +99,11 @@ def rows(filters):
 				"student": student.name,
 				"student_name": student.student_name,
 				"status": status,
+				# Why a student has not registered is the question this report gets
+				# asked, and "they are not allowed to" is an answer nobody can reach
+				# from the other columns. Chasing a student who is barred wastes
+				# everybody's time.
+				"standing": standings.get(student.name, ""),
 				# Not a column — the report has no room for it and nobody reading a
 				# list of students needs the number. It is here because the block is
 				# worked out above either way, and the dashboard groups by it. Left
@@ -115,6 +130,24 @@ def rows(filters):
 	order = {NOT_REGISTERED: 0, REGISTERED: 1, NOT_THIS_TERM: 2}
 	out.sort(key=lambda row: (order[row["status"]], -row["needs_review"], row["student"]))
 	return out
+
+
+def standing_labels(students, academic_term):
+	"""student -> a word about their standing, for the students who need one.
+
+	Skipped entirely where no rule is configured, rather than computed and thrown
+	away: this runs over the whole cohort on a report staff open constantly, and
+	on most sites the column is empty by design.
+	"""
+	if not (students and rule()):
+		return {}
+
+	labels = {}
+	for student, assessed in standing_for(students, academic_term).items():
+		if not assessed["excluded"]:
+			continue
+		labels[student] = ALLOWED_ANYWAY if assessed["override"] else CANNOT_REGISTER
+	return labels
 
 
 def _registered_block(registered):

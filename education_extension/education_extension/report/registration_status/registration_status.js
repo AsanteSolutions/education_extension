@@ -29,6 +29,16 @@ frappe.query_reports['Registration Status'] = {
 	],
 
 	onload: (report) => {
+		// Granting a permission is a registrar's reaction to this very list, so it
+		// starts from here rather than from a doctype they would have to know the
+		// name of. The term comes across with it; getting that wrong produces a
+		// permission that silently covers nothing.
+		report.page.add_inner_button(__('Allow a Student to Register'), () => {
+			frappe.new_doc('Registration Override', {
+				academic_term: report.get_filter_value('academic_term'),
+			});
+		});
+
 		// Default the term to whichever one has a registration period, so the
 		// report opens on the question being asked rather than empty.
 		if (report.get_filter_value('academic_term')) return;
@@ -58,6 +68,12 @@ frappe.query_reports['Registration Status'] = {
 			} else {
 				value = `<span style="color: var(--gray-500)">${value}</span>`;
 			}
+		}
+
+		if (column.fieldname === 'standing' && data.standing) {
+			const colour =
+				data.standing === 'Cannot register' ? 'var(--red-600)' : 'var(--blue-600)';
+			value = `<span style="color: ${colour}; font-weight: 500">${value}</span>`;
 		}
 
 		if (column.fieldname === 'needs_review' && data.needs_review) {

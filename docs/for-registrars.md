@@ -82,6 +82,44 @@ is listed with one of three statuses:
 You can filter by status or by programme. The columns also show how many modules
 each student took, how many are provisional, and how many need review.
 
+The **Standing** column is filled in only where the academic standing rule has
+something to say about a student, and only if that rule is switched on at all —
+see [Settings](settings.md). It reads **Cannot register** for a student the rule
+is turning away, and **Allowed anyway** for one you have let through. Worth a
+glance before you chase anybody: a student who is barred is not going to
+register no matter how many times you ask.
+
+## Letting a student register anyway
+
+The academic standing rule is arithmetic, and arithmetic is a poor judge of
+whether a particular student should be given another term. Illness, a death at
+home, results that were never captured when this system was adopted — none of
+that is in the failure count, and all of it is a reason you might say yes.
+
+So the rule is appealable, and you are the appeal.
+
+1. On the **Registration Status** report, press **Allow a Student to Register**.
+   The semester comes across with the report's filter.
+2. Choose the student. The figures the rule counted appear at the top of the
+   form as soon as you do, so you are deciding in front of them rather than
+   beside them.
+3. Write the **reason**. It is required. The next person to look at this student
+   should be able to see what was decided and on what grounds.
+4. Add **conditions** if the student has been told they must do something.
+   Nothing enforces these — they are there to be read.
+5. **Submit.** Submitting is the grant. The student is told immediately, which
+   matters: a student turned away once has no reason to keep checking, and
+   registration windows are short.
+
+Two things to know about it:
+
+- **It covers one semester.** A decision taken on one semester's results has to
+  be taken again against the next. It does not quietly carry forward.
+- **Cancelling revokes it.** The student is blocked again from that moment.
+
+Never fix this by editing the student's results until the rule stops firing.
+That leaves no trace, and it corrupts the transcript.
+
 ## Proof of registration
 
 Every registration creates a **Registration Consent** record holding the
@@ -130,6 +168,14 @@ Look at the module's row on their registration page — it names the prerequisit
 it is waiting on. Usually the earlier module has no recorded pass, either
 because marking is not finished or because the remark code was never entered.
 Fixing the remark fixes the block.
+
+**"A student says they are blocked because of their results."**
+Open the Registration Status report for the semester and look at the Standing
+column. If it says *Cannot register*, the academic standing rule is turning them
+away and the figures are on the message they were shown. Check them: a module
+whose result was never captured counts as nothing, not as a pass, and a genuinely
+miscounted record is fixed by fixing the remark. If the figures are right and you
+still want the student in, see *Letting a student register anyway* above.
 
 **"A student cannot see a module that is definitely in their programme."**
 Check which semester the module runs in. Modules are only offered in the half of

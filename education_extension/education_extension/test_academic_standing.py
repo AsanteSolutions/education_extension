@@ -35,6 +35,12 @@ from education_extension.education_extension.testing import (
 YEAR = "2025-2026"
 EARLIER = "2024-2025"
 TERM = "Semester 1 2025-2026"
+LATER_TERM = "Semester 2 2025-2026"
+
+# Two semesters inside one academic year, which is what separates the two
+# narrow windows from each other.
+TERM_STARTS = {TERM: "2025-01-15", LATER_TERM: "2025-07-15"}
+YEAR_STARTS = {EARLIER: "2024-01-15", YEAR: "2025-01-15"}
 
 
 def rule(most=0, rate=0, window=standing.LATEST_YEAR):
@@ -42,14 +48,17 @@ def rule(most=0, rate=0, window=standing.LATEST_YEAR):
 
 
 def attempts(*sittings):
-	"""{(course, year, term): code} from (code, module number, year) triples.
+	"""{(course, year, term): code} from (code, module number, year[, term]) rows.
+
+	The term defaults, because most of these tests are about the thresholds and
+	only the window ones care which semester a sitting fell in.
 
 	Courses are named the way the curriculum names them, because `failed_modules`
 	shortens them to their codes and that is worth exercising.
 	"""
 	return {
-		("ANH{0} - Module {0}".format(course), year, TERM): code
-		for code, course, year in sittings
+		("ANH{0} - Module {0}".format(row[1]), row[2], row[3] if len(row) > 3 else TERM): row[0]
+		for row in sittings
 	}
 
 
@@ -121,17 +130,76 @@ class TestTheRule(UnitTestCase):
 		taken = attempts(
 			("F", 1, EARLIER), ("F", 2, EARLIER), ("F", 3, EARLIER), ("P", 4, YEAR)
 		)
-		starts = {EARLIER: "2024-01-01", YEAR: "2025-01-01"}
 
-		latest = standing.assess(taken, rule(most=3), starts)
+		latest = standing.assess(taken, rule(most=3), YEAR_STARTS)
 		self.assertFalse(latest["excluded"], "last year's failures are behind them")
 		self.assertEqual(latest["window"], YEAR)
 		self.assertEqual(latest["attempted"], 1)
 
-		whole = standing.assess(taken, rule(most=3, window=standing.WHOLE_RECORD), starts)
+		whole = standing.assess(taken, rule(most=3, window=standing.WHOLE_RECORD), YEAR_STARTS)
 		self.assertTrue(whole["excluded"])
 		self.assertIsNone(whole["window"], "the whole record is not a window")
 		self.assertEqual(whole["attempted"], 4)
+
+	def test_the_semester_window_sees_one_semester_and_not_the_year_round_it(self):
+		"""The three windows differ on the same record, which is the point of
+		offering all three."""
+		taken = attempts(
+			("F", 1, YEAR, TERM),
+			("F", 2, YEAR, TERM),
+			("F", 3, YEAR, LATER_TERM),
+			("P", 4, YEAR, LATER_TERM),
+			("P", 5, YEAR, LATER_TERM),
+		)
+
+		semester = standing.assess(taken, rule(most=3, window=standing.LATEST_TERM), TERM_STARTS)
+		self.assertEqual(semester["window"], LATER_TERM)
+		self.assertEqual((semester["failed"], semester["attempted"]), (1, 3))
+		self.assertFalse(semester["excluded"])
+
+		year = standing.assess(taken, rule(most=3), YEAR_STARTS)
+		self.assertEqual(year["window"], YEAR)
+		self.assertEqual((year["failed"], year["attempted"]), (3, 5))
+		self.assertTrue(year["excluded"], "the first semester's failures count for the year")
+
+	def test_the_semester_window_is_the_last_one_with_results_in_it(self):
+		"""Not the last one on the calendar.
+
+		A student who sat a semester out has nothing in it, and judging them on an
+		empty window would mean nought of nought — which is not a failure rate, and
+		would quietly excuse the semester they did fail.
+		"""
+		taken = attempts(("F", 1, YEAR, TERM), ("F", 2, YEAR, TERM))
+
+		assessed = standing.assess(taken, rule(most=2, window=standing.LATEST_TERM), TERM_STARTS)
+		self.assertEqual(assessed["window"], TERM)
+		self.assertTrue(assessed["excluded"])
+
+	def test_the_latest_semester_is_the_one_that_starts_last(self):
+		# Same trap as the year window: these names sort the wrong way round.
+		taken = attempts(("F", 1, YEAR, "Autumn"), ("P", 2, YEAR, "Spring"))
+		starts = {"Autumn": "2025-07-15", "Spring": "2025-01-15"}
+
+		assessed = standing.assess(taken, rule(most=1, window=standing.LATEST_TERM), starts)
+		self.assertEqual(assessed["window"], "Autumn")
+		self.assertTrue(assessed["excluded"])
+
+	def test_every_window_the_setting_offers_is_one_the_rule_knows(self):
+		"""Or a window could be chosen that silently measures something else.
+
+		An unknown value falls through to the academic year, which is a reasonable
+		default and a terrible thing to do quietly.
+		"""
+		offered = frappe.get_meta("Registration Settings").get_field("failure_window")
+		self.assertEqual(
+			[option for option in offered.options.split("\n") if option],
+			[standing.LATEST_TERM, standing.LATEST_YEAR, standing.WHOLE_RECORD],
+		)
+		# Every window that narrows the record needs somewhere to read its dates
+		# from; the whole record is the one that does not.
+		self.assertEqual(
+			set(standing.WINDOW_SOURCES), {standing.LATEST_TERM, standing.LATEST_YEAR}
+		)
 
 	def test_the_latest_year_is_the_one_that_starts_last(self):
 		"""Not the one whose name sorts last.
@@ -328,6 +396,38 @@ class TestTheOverride(IntegrationTestCase):
 		)
 
 
+class TestTheWindowsReadRealDates(IntegrationTestCase):
+	"""`period_starts` against the doctypes it actually names.
+
+	The pure tests above hand it dates, so a wrong doctype or a misspelt date
+	field would sail past every one of them and only show up as a window that
+	silently picks whichever period sorts last by name.
+	"""
+
+	def setUp(self):
+		needs_education_app(self)
+		needs_doctype(self, "Academic Year", "Academic Term")
+
+	def test_each_window_reads_dates_off_its_own_doctype(self):
+		for window, doctype in (
+			(standing.LATEST_TERM, "Academic Term"),
+			(standing.LATEST_YEAR, "Academic Year"),
+		):
+			starts = standing.period_starts(window)
+			names = frappe.get_all(doctype, pluck="name")
+			self.assertEqual(set(starts), set(names), window)
+			if names:
+				self.assertTrue(
+					any(date != standing._UNDATED for date in starts.values()),
+					"every {0} came back undated, which means the date field is wrong".format(
+						doctype
+					),
+				)
+
+	def test_the_whole_record_reads_no_dates_at_all(self):
+		self.assertEqual(standing.period_starts(standing.WHOLE_RECORD), {})
+
+
 class TestTheRuleIsOffUntilSomebodyTurnsItOn(IntegrationTestCase):
 	"""The shipped default, which is what a site runs on until someone changes it."""
 
@@ -398,6 +498,11 @@ def run_tests(verbosity=2):
 	"""Run these from a console, since bench run-tests cannot bootstrap this site."""
 	suite = unittest.TestSuite()
 	loader = unittest.TestLoader()
-	for case in (TestTheRule, TestTheOverride, TestTheRuleIsOffUntilSomebodyTurnsItOn):
+	for case in (
+		TestTheRule,
+		TestTheOverride,
+		TestTheWindowsReadRealDates,
+		TestTheRuleIsOffUntilSomebodyTurnsItOn,
+	):
 		suite.addTests(loader.loadTestsFromTestCase(case))
 	return unittest.TextTestRunner(verbosity=verbosity).run(suite)

@@ -38,12 +38,21 @@ from education_extension.education_extension.registration import (
 	outcome_of,
 )
 
-# What span of the record the thresholds are measured over.
+# What span of the record the thresholds are measured over, narrowest first.
+LATEST_TERM = "Most recent semester"
 LATEST_YEAR = "Most recent academic year"
 WHOLE_RECORD = "Whole record"
 
-# Sorts an academic year with no start date on record behind every year that has
-# one, rather than raising when the two are compared.
+# Where the dates that order each window are read from. The whole record needs
+# no dates, so it is absent rather than mapped to nothing: the absence is what
+# says there is no window to pick.
+WINDOW_SOURCES = {
+	LATEST_TERM: ("Academic Term", "term_start_date"),
+	LATEST_YEAR: ("Academic Year", "year_start_date"),
+}
+
+# Sorts a year or term with no start date on record behind every one that has
+# a date, rather than raising when the two are compared.
 _UNDATED = getdate("1900-01-01")
 
 
@@ -69,33 +78,56 @@ def rule():
 	)
 
 
-def year_starts():
-	"""academic year -> the date it starts, for ordering them.
+def period_starts(window):
+	"""period -> the date it starts, for ordering the candidates for `window`.
 
-	Read rather than inferred from the name. Academic years are named freely and
-	"2025-2026" only happens to sort correctly; the institution could rename them
-	tomorrow and the window would silently start picking the wrong one.
+	Read rather than inferred from the name. Academic years and terms are both
+	named freely, and "2025-2026" only happens to sort correctly; the institution
+	could rename them tomorrow and the window would silently start picking the
+	wrong one.
+
+	Empty for the whole record, which has no window to pick and so needs no dates.
 	"""
+	source = WINDOW_SOURCES.get(window)
+	if not source:
+		return {}
+
+	doctype, field = source
 	return {
-		row.name: getdate(row.year_start_date) if row.year_start_date else _UNDATED
-		for row in frappe.get_all("Academic Year", fields=["name", "year_start_date"])
+		row.name: getdate(row.get(field)) if row.get(field) else _UNDATED
+		for row in frappe.get_all(doctype, fields=["name", field])
 	}
 
 
-def _started(starts, year):
-	"""When an academic year began, as a date, whatever the caller handed over.
+def _period_of(rule):
+	"""What a sitting is grouped by, for the window this rule measures over.
 
-	Coerced rather than assumed, because a year missing from the map would
-	otherwise be a date compared against a string and the window would raise
+	None for every sitting where there is no window, which is what stops the
+	narrowing below from happening at all rather than being a special case in it.
+	"""
+	if not rule or rule.window == WHOLE_RECORD:
+		return lambda _year, _term: None
+	if rule.window == LATEST_TERM:
+		return lambda _year, term: term
+	return lambda year, _term: year
+
+
+def _started(starts, period):
+	"""When a year or term began, as a date, whatever the caller handed over.
+
+	Coerced rather than assumed, because a period missing from the map would
+	otherwise be a date compared against a string, and the window would raise
 	instead of picking one.
 	"""
-	return getdate(starts.get(year)) if starts.get(year) else _UNDATED
+	return getdate(starts.get(period)) if starts.get(period) else _UNDATED
 
 
 def assess(attempts, rule, starts=None):
 	"""How one student's attempts stand against `rule`.
 
 	Pure, so the line an institution draws can be checked without a site.
+	`starts` orders the candidates for the window and comes from `period_starts`;
+	the whole record needs none.
 
 	A module still waiting on a supplementary or an aegrotat counts as attempted
 	and not as failed. That is what the record actually says — the sitting
@@ -108,20 +140,24 @@ def assess(attempts, rule, starts=None):
 	Only the rate needs that care. Counting failures is unaffected either way.
 	"""
 	starts = starts or {}
-	sittings = [
-		(course, year, outcome_of(code))
-		for (course, year, _term), code in attempts.items()
-	]
+	period_of = _period_of(rule)
+
 	# A sitting with no code on it says nothing, so it is neither an attempt nor
 	# a failure.
-	sittings = [row for row in sittings if row[2] != NEVER]
+	sittings = [
+		(course, period_of(year, term), outcome_of(code))
+		for (course, year, term), code in attempts.items()
+		if outcome_of(code) != NEVER
+	]
 
+	# The latest period this student has results in, not the latest the calendar
+	# knows about: a student who sat a semester out is judged on the last one they
+	# were there for, rather than on an empty window.
 	window = None
-	if rule and rule.window == LATEST_YEAR:
-		years = {year for _course, year, _outcome in sittings if year}
-		if years:
-			window = max(years, key=lambda year: (_started(starts, year), year))
-			sittings = [row for row in sittings if row[1] == window]
+	periods = {period for _course, period, _outcome in sittings if period}
+	if periods:
+		window = max(periods, key=lambda period: (_started(starts, period), period))
+		sittings = [row for row in sittings if row[1] == window]
 
 	# Counted per module rather than per sitting, because that is what "failed
 	# five of eight modules" means to the person setting the threshold, and
@@ -129,7 +165,7 @@ def assess(attempts, rule, starts=None):
 	# best outcome wins, so a module failed and later passed is a pass: excluding
 	# a student over a module they have since passed would be indefensible.
 	best = {}
-	for course, _year, outcome in sittings:
+	for course, _period, outcome in sittings:
 		if _RANK[outcome] > _RANK.get(best.get(course, NEVER), 0):
 			best[course] = outcome
 
@@ -233,7 +269,7 @@ def standing_for(students, academic_term=None):
 
 	configured = rule()
 	attempts = attempts_for(students)
-	starts = year_starts() if configured and configured.window == LATEST_YEAR else {}
+	starts = period_starts(configured.window) if configured else {}
 	permitted = overrides_for(students, academic_term) if configured else {}
 
 	standings = {}

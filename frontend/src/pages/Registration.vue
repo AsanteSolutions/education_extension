@@ -78,6 +78,17 @@
 					finance office to register.
 				</Alert>
 
+				<!-- Shown above the modules rather than instead of them. A student who
+				     is being turned away over their results should still be able to see
+				     what the term would have held, and the figures the rule counted. -->
+				<Alert
+					v-if="data.standing_block"
+					class="mb-4"
+					title="Registration is blocked by your results"
+				>
+					{{ data.standing_block.reason }}
+				</Alert>
+
 				<!-- Step 1: what they will be taking. -->
 				<template v-if="step === 1">
 					<div v-for="group in data.groups" :key="group.block" class="mb-5">
@@ -96,7 +107,7 @@
 								<Checkbox
 									v-if="row.selectable"
 									:modelValue="chosen.has(row.course)"
-									:disabled="isMandatory(row) || !!data.fee_block"
+									:disabled="isMandatory(row) || blocked"
 									class="mt-0.5"
 									@update:modelValue="toggle(row.course)"
 								/>
@@ -136,7 +147,7 @@
 						</span>
 						<Button
 							variant="solid"
-							:disabled="!chosen.size || !!data.fee_block"
+							:disabled="!chosen.size || blocked"
 							@click="step = 2"
 						>
 							Continue
@@ -350,6 +361,11 @@ const toggle = (course) => {
 // Sorted for the review list: course names begin with the module code, so this
 // reads in curriculum order.
 const sortedChosen = computed(() => [...chosen].sort())
+
+// Both blocks work the same way from here: the modules stay on screen and
+// nothing can be chosen or submitted. The server refuses either one again on
+// submit, so this is what the student sees rather than what enforces it.
+const blocked = computed(() => !!data.value?.fee_block || !!data.value?.standing_block)
 
 const hasProvisional = computed(() =>
 	(data.value?.modules || []).some((module) => module.provisional),

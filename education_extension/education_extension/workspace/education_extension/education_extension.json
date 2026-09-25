@@ -47,6 +47,17 @@
   {
    "dependencies": "",
    "hidden": 0,
+   "is_query_report": 0,
+   "label": "Registration Override",
+   "link_count": 0,
+   "link_to": "Registration Override",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
    "is_query_report": 1,
    "label": "Registration Status",
    "link_count": 0,
@@ -217,7 +228,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-09-21 12:00:00.000000",
+ "modified": "2026-09-25 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "Education Extension",
  "name": "Education Extension",

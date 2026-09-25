@@ -8,6 +8,11 @@
  "field_order": [
   "eligibility_section",
   "missing_result_policy",
+  "academic_standing_section",
+  "block_on_failed_modules",
+  "failure_window",
+  "maximum_failed_modules",
+  "maximum_failure_rate",
   "fees_section",
   "block_on_outstanding_fees",
   "outstanding_fee_tolerance",
@@ -34,6 +39,45 @@
    "label": "When a prerequisite has no result on record",
    "options": "Do not block\nTreat as not passed",
    "reqd": 1
+  },
+  {
+   "fieldname": "academic_standing_section",
+   "fieldtype": "Section Break",
+   "label": "Academic Standing"
+  },
+  {
+   "default": "0",
+   "description": "Refuse registration to a student who has failed too much of what they have taken. Off by default, and it should stay off until results are complete in this system: counted against a partial record the rule excludes students over results that were simply never captured. A registrar can let any individual student through with a Registration Override.",
+   "fieldname": "block_on_failed_modules",
+   "fieldtype": "Check",
+   "label": "Failed Modules Block Registration"
+  },
+  {
+   "default": "Most recent academic year",
+   "depends_on": "block_on_failed_modules",
+   "description": "How much of the record is counted. Most recent academic year: only the year the student last has results for, so a bad year is not held against them for ever. Whole record: every module they have ever taken.",
+   "fieldname": "failure_window",
+   "fieldtype": "Select",
+   "label": "Counted Over",
+   "options": "Most recent academic year\nWhole record"
+  },
+  {
+   "default": "0",
+   "depends_on": "block_on_failed_modules",
+   "description": "Block a student who has failed this many modules or more. Leave at 0 to go by the rate alone.",
+   "fieldname": "maximum_failed_modules",
+   "fieldtype": "Int",
+   "label": "Modules Failed",
+   "non_negative": 1
+  },
+  {
+   "default": "0",
+   "depends_on": "block_on_failed_modules",
+   "description": "Block a student who has failed this percentage of the modules they took or more. A module still waiting on a supplementary or aegrotat result counts as taken and not as failed, so a late result cannot exclude anybody. Leave at 0 to go by the count alone; with both at 0 nobody is blocked.",
+   "fieldname": "maximum_failure_rate",
+   "fieldtype": "Percent",
+   "label": "Percentage Failed",
+   "non_negative": 1
   },
   {
    "fieldname": "fees_section",
@@ -107,7 +151,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-21 16:00:00.000000",
+ "modified": "2026-09-25 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "Education Extension",
  "name": "Registration Settings",

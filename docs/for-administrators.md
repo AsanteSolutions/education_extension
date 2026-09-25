@@ -158,7 +158,8 @@ from education_extension.education_extension.test_registration import run_tests
 run_tests()
 ```
 
-The same pattern works for `test_marking`, `test_dashboard` and `test_desk`.
+The same pattern works for `test_marking`, `test_dashboard`, `test_desk`,
+`test_registration_forms` and `test_academic_standing`.
 
 ## Troubleshooting
 
@@ -166,6 +167,13 @@ The same pattern works for `test_marking`, `test_dashboard` and `test_desk`.
 Almost certainly *When a prerequisite has no result on record* is set to *Treat
 as not passed* on a site whose history is incomplete. See
 [settings](settings.md#when-a-prerequisite-has-no-result-on-record).
+
+**Students are turned away over their results.**
+*Failed Modules Block Registration* is on in Registration Settings. Like the
+prerequisite setting above, it is only safe once results are complete in this
+system — counted against a partial record it excludes students over results that
+were never captured. Switch it off, or let individual students through with a
+Registration Override.
 
 **Students say marks are missing after you approved everything.**
 No Progress Report Issue Date for that semester, or its release moment has not

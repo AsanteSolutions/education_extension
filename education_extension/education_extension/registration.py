@@ -73,32 +73,51 @@ def outcome_of(code):
 	return FAILED
 
 
+# The two remark doctypes, and the field each keeps its code in. Ordered: a
+# supplementary result supersedes the SUPP that granted it, so it is read second
+# and overwrites. An aegrotat needs no such handling -- its mark displaces the
+# main sitting, so the original remark is what changes.
+REMARK_SOURCES = (
+	("Academic Remark", "remark"),
+	("Supplementary Academic Remark", "supp_remark"),
+)
+
+
+def attempts_for(students):
+	"""student -> {(course, academic_year, academic_term): remark code}.
+
+	Every sitting on record, collapsed per sitting but not per module -- which is
+	the difference between this and `academic_history` below. A module failed one
+	year and passed the next is one history entry and two sittings, and the
+	standing rule needs both to know which year each falls in before it collapses
+	them its own way.
+
+	Batched because the Registration Status report asks this of a whole cohort at
+	once, and two queries per student across two hundred students is a report
+	nobody waits for.
+	"""
+	attempts = {student: {} for student in students}
+	if not students:
+		return attempts
+
+	for doctype, field in REMARK_SOURCES:
+		for row in frappe.get_all(
+			doctype,
+			filters={"student": ["in", list(students)], "docstatus": 1},
+			fields=["student", "course", "academic_year", "academic_term", field],
+		):
+			attempts[row.student][(row.course, row.academic_year, row.academic_term)] = row.get(field)
+
+	return attempts
+
+
 def academic_history(student):
 	"""course -> PASSED / FAILED / PENDING across every attempt.
 
-	A supplementary result supersedes the SUPP that granted it, so the two remark
-	doctypes are collapsed per attempt before the best attempt is taken. An
-	aegrotat needs no such handling: its mark displaces the main sitting, so the
-	original remark is what changes.
+	The better outcome wins, so a module failed and later passed reads as passed.
 	"""
-	attempts = {}
-
-	for row in frappe.get_all(
-		"Academic Remark",
-		filters={"student": student, "docstatus": 1},
-		fields=["course", "academic_year", "academic_term", "remark"],
-	):
-		attempts[(row.course, row.academic_year, row.academic_term)] = row.remark
-
-	for row in frappe.get_all(
-		"Supplementary Academic Remark",
-		filters={"student": student, "docstatus": 1},
-		fields=["course", "academic_year", "academic_term", "supp_remark"],
-	):
-		attempts[(row.course, row.academic_year, row.academic_term)] = row.supp_remark
-
 	history = {}
-	for (course, _year, _term), code in attempts.items():
+	for (course, _year, _term), code in attempts_for([student])[student].items():
 		outcome = outcome_of(code)
 		if _RANK[outcome] > _RANK.get(history.get(course, NEVER), 0):
 			history[course] = outcome
@@ -385,11 +404,27 @@ def options_for(student, on=None):
 		"block_label": _semester_label(block),
 		"program": program,
 		"fee_block": fee_block(student),
+		# Sent alongside the modules rather than instead of them. A student being
+		# turned away should still see what the term would have held and what the
+		# rule counted, or the refusal is unanswerable.
+		"standing_block": _standing_block(student, period.academic_term),
 		"groups": _grouped(rows),
 		# Sent with the modules so the second step needs no further call, and so
 		# the wording the student is shown is the wording that gets recorded.
 		"declarations": declarations(student),
 	}
+
+
+def _standing_block(student, academic_term):
+	"""What the academic standing rule says about this student, or None.
+
+	Imported inside the function because `academic_standing` reads this module's
+	vocabulary of remark codes and outcomes, so importing it at the top would
+	make a cycle. Same reason the student lookup in `my_options` is where it is.
+	"""
+	from education_extension.education_extension.academic_standing import registration_block
+
+	return registration_block(student, academic_term)
 
 
 def declarations(student=None):
@@ -631,6 +666,12 @@ def register_student(student, courses, agreed=None, signatures=None):
 				frappe.utils.fmt_money(options["fee_block"])
 			)
 		)
+
+	# Re-read here and not trusted from the page for the same reason as everything
+	# else in this function: a registrar may have granted the permission, or
+	# cancelled it, since the page was drawn.
+	if options["standing_block"]:
+		frappe.throw(options["standing_block"]["reason"])
 
 	rows = {row["course"]: row for group in options["groups"] for row in group["rows"]}
 	chosen = list(dict.fromkeys(courses))
@@ -1044,9 +1085,13 @@ def _report_to_staff(enrollment, row, blocking):
 	)
 
 
-def _tell_student(enrollment, subject, message):
-	"""In-app notification, and email when the site can send it."""
-	user = frappe.db.get_value("Student", enrollment.student, "user")
+def notify_student(student, subject, message, doctype=None, name=None):
+	"""In-app notification, and email when the site can send it.
+
+	Silent where the student has no user account. Most do not: the portal is
+	opt-in and the notice is a courtesy, not the record of what happened.
+	"""
+	user = frappe.db.get_value("Student", student, "user")
 	if not user:
 		return
 
@@ -1055,8 +1100,8 @@ def _tell_student(enrollment, subject, message):
 			"doctype": "Notification Log",
 			"for_user": user,
 			"type": "Alert",
-			"document_type": "Program Enrollment",
-			"document_name": enrollment.name,
+			"document_type": doctype,
+			"document_name": name,
 			"subject": subject,
 			"email_content": message,
 		}
@@ -1067,9 +1112,19 @@ def _tell_student(enrollment, subject, message):
 	try:
 		frappe.sendmail(recipients=[user], subject=subject, message=message)
 	except Exception:
-		# The in-app notice has already landed; a mail failure must not undo a
-		# deregistration that is otherwise correct.
+		# The in-app notice has already landed; a mail failure must not undo the
+		# thing being reported, which is otherwise correct and already done.
 		frappe.log_error(title="Registration notice email failed")
+
+
+def _tell_student(enrollment, subject, message):
+	notify_student(
+		enrollment.student,
+		subject,
+		message,
+		doctype="Program Enrollment",
+		name=enrollment.name,
+	)
 
 
 def on_remark_change(doc, method=None):

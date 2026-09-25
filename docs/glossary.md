@@ -61,6 +61,10 @@ when setting a scheme up.
 scaling every mark (*Linear Scale*) or adding the same amount to everyone
 (*Flat Adjustment*). Recorded with a reason; the original marks are kept.
 
+**Academic standing** — how much of what a student has taken they have
+passed. Where the college has set a threshold, failing too much stops a student
+registering again until a registrar allows it.
+
 **Prerequisite** — a module that must be passed before another may be taken.
 Enforced as a hard rule: a blocked module cannot be registered for.
 
@@ -92,6 +96,7 @@ the `SUPP` code. Reported in a column of its own so both attempts stay visible.
 |---|---|
 | **Registration Period** | One per semester. The window students may register in. |
 | **Registration Consent** | What a student agreed and signed when registering. Also what Proof of Registration is printed from. |
+| **Registration Override** | A registrar's decision to let one student register for one semester despite their results, with the reason. |
 | **Registration Settings** | The rules the registration page enforces. One for the college. |
 | **Course Prerequisite** | An entry on a Course saying which module must come first. |
 | **Course Mark Scheme** | How a course's final mark is built — which assessments, and what each is worth. One per course per year. |

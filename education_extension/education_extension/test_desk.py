@@ -247,23 +247,21 @@ class TestCopyOntoEducation(IntegrationTestCase):
 		return state
 
 
-class TestTheRecordsFrappeWillNotImport(IntegrationTestCase):
-	"""The dashboard, its charts and its cards.
+class TestTheDashboardTheSidebarPointsAt(IntegrationTestCase):
+	"""The sidebar links to this app's dashboard, and Frappe makes that dashboard.
 
-	None of the three doctypes is in Frappe's IMPORTABLE_DOCTYPES, so nothing
-	reads the files this app ships them in and a clean install had none of them.
-	That was not cosmetic: the sidebar links to the dashboard, and the sidebar is
-	saved whenever there is a link to add, which Frappe refuses to do while a row
-	points at something it cannot resolve. It took an install down.
+	Not this app: `sync_dashboards` creates the Dashboard, the four charts and the
+	six cards from the files this app ships them in, on install and again on every
+	migrate. Which is the trap. On an install it runs *after* the `after_install`
+	hooks, so while `apply_desk_records` is running the dashboard does not exist
+	yet, and saving a sidebar that links to it would be refused.
 
-	Two things here have to be kept away from the source tree, and both bit
-	during the writing of these tests. `delete_doc` on a standard record deletes
-	the file the app ships it in, so the wipe below is `frappe.db.delete`, which
-	is raw SQL and fires no hooks. And *saving* a standard record exports it back
-	over that file, so every save goes through `_without_writing_to_the_source_tree`
-	-- the same guard `desk` itself saves under. Without it these tests rewrote
-	the shipped sidebar from the database, which quietly repaired the very drift
-	one of them is here to detect.
+	The wipes use `frappe.db.delete` rather than `delete_doc`, and the saves go
+	through `_without_writing_to_the_source_tree`. Both matter on a developer_mode
+	site, where deleting a standard record deletes the file the app ships it in
+	and saving one exports it back over that file. Before the guard was added
+	these tests rewrote the shipped sidebar from the database mid-run, which
+	quietly repaired the very drift one of them is here to detect.
 	"""
 
 	SHIPPED = (
@@ -274,18 +272,11 @@ class TestTheRecordsFrappeWillNotImport(IntegrationTestCase):
 
 	def setUp(self):
 		needs_doctype(self, "Dashboard", "Dashboard Chart", "Number Card")
+		if not frappe.db.exists("Workspace Sidebar", desk.SOURCE):
+			self.skipTest("no sidebar on this site")
 
 	def tearDown(self):
 		frappe.db.rollback()
-		frappe.clear_cache()
-
-	def wipe(self):
-		"""The state a fresh install is in before `apply_desk_records` runs."""
-		dashboards = list(self.shipped_names("education_extension_dashboard"))
-		for table in ("Dashboard Chart Link", "Number Card Link"):
-			frappe.db.delete(table, {"parent": ["in", dashboards]})
-		for doctype, _folder in self.SHIPPED:
-			frappe.db.delete(doctype, {"module": "Education Extension"})
 		frappe.clear_cache()
 
 	def shipped_names(self, folder):
@@ -293,6 +284,26 @@ class TestTheRecordsFrappeWillNotImport(IntegrationTestCase):
 			frappe.get_app_path("education_extension", "education_extension", folder), "*", "*.json"
 		)
 		return {json.load(open(path, encoding="utf-8"))["name"] for path in glob.glob(pattern)}
+
+	def unlink(self, link_to):
+		"""Take one row out of the sidebar, so the hook has work to do.
+
+		Without this the hook finds nothing to add, never saves, and a test of
+		what happens when it saves passes without doing anything. Which is exactly
+		how the install broke: the shipped sidebar listed everything the workspace
+		did, so the save had not run in months.
+		"""
+		frappe.db.delete("Workspace Sidebar Item", {"parent": desk.SOURCE, "link_to": link_to})
+		frappe.clear_cache()
+
+	def wipe(self):
+		"""The state a fresh install is in when `after_install` hooks run."""
+		dashboards = list(self.shipped_names("education_extension_dashboard"))
+		for table in ("Dashboard Chart Link", "Number Card Link"):
+			frappe.db.delete(table, {"parent": ["in", dashboards]})
+		for doctype, _folder in self.SHIPPED:
+			frappe.db.delete(doctype, {"module": "Education Extension"})
+		frappe.clear_cache()
 
 	def test_the_shipped_sidebar_file_lists_what_the_shipped_page_file_does(self):
 		"""Read off the files, not the database.
@@ -302,11 +313,14 @@ class TestTheRecordsFrappeWillNotImport(IntegrationTestCase):
 		long as it did -- every site looked right. The files are what a fresh
 		install starts from, so they are what this checks.
 		"""
+
 		def read(*parts):
 			with open(frappe.get_app_path("education_extension", *parts), encoding="utf-8") as f:
 				return json.load(f)
 
-		page = read("education_extension", "workspace", "education_extension", "education_extension.json")
+		page = read(
+			"education_extension", "workspace", "education_extension", "education_extension.json"
+		)
 		sidebar = read("workspace_sidebar", "education_extension.json")
 
 		on_page = {row["link_to"] for row in page["links"] if row["type"] == "Link"}
@@ -320,16 +334,14 @@ class TestTheRecordsFrappeWillNotImport(IntegrationTestCase):
 		}
 		self.assertEqual(on_page, in_sidebar)
 
-	def test_every_record_this_app_ships_is_created_on_a_clean_install(self):
-		self.wipe()
-		for doctype, _folder in self.SHIPPED:
-			self.assertEqual(
-				frappe.db.count(doctype, {"module": "Education Extension"}),
-				0,
-				"{0} survived the wipe".format(doctype),
-			)
+	def test_frappe_makes_every_record_this_app_ships_for_its_dashboard(self):
+		"""If this ever stops being true, the sidebar link goes nowhere and the
+		dashboard is empty. Nothing else in this app would notice."""
+		from frappe.utils.dashboard import sync_dashboards
 
-		desk.apply_desk_records()
+		self.wipe()
+		with desk._without_writing_to_the_source_tree():
+			sync_dashboards("education_extension")
 
 		for doctype, folder in self.SHIPPED:
 			present = set(
@@ -337,48 +349,66 @@ class TestTheRecordsFrappeWillNotImport(IntegrationTestCase):
 			)
 			self.assertEqual(present, self.shipped_names(folder), doctype)
 
-	def test_making_them_twice_makes_nothing_twice(self):
-		"""It runs on every migrate, not only on install."""
-		before = {
-			doctype: frappe.db.count(doctype, {"module": "Education Extension"})
-			for doctype, _folder in self.SHIPPED
-		}
-		desk.apply_desk_records()
-		after = {
-			doctype: frappe.db.count(doctype, {"module": "Education Extension"})
-			for doctype, _folder in self.SHIPPED
-		}
-		self.assertEqual(before, after)
+	def test_the_hook_survives_the_dashboard_not_existing_yet(self):
+		"""The install failure, reproduced.
 
-	def test_the_sidebar_can_be_saved_once_they_are_there(self):
-		"""The line the install actually died on."""
-		if not frappe.db.exists("Workspace Sidebar", desk.SOURCE):
-			self.skipTest("no sidebar on this site")
-
+		`developer_mode` is turned off for the duration because that is how a real
+		install runs, and several of the records involved validate differently
+		under it -- a standard Dashboard Chart refuses to be written at all. With
+		it left on, this passes for the wrong reason.
+		"""
 		self.wipe()
-		desk.apply_desk_records()
+		self.unlink("Academic Exclusions")
+
+		developer_mode = frappe.conf.developer_mode
+		in_install = frappe.flags.in_install
+		try:
+			frappe.conf.developer_mode = 0
+			frappe.flags.in_install = "education_extension"
+			with desk._without_writing_to_the_source_tree():
+				desk.apply_desk_records()
+		finally:
+			frappe.conf.developer_mode = developer_mode
+			frappe.flags.in_install = in_install
 
 		sidebar = frappe.get_doc("Workspace Sidebar", desk.SOURCE)
-		sidebar.flags.ignore_permissions = True
+		links = [row.link_to for row in sidebar.items if row.type == "Link"]
+		self.assertIn("Academic Exclusions", links, "the hook did not put the link back")
+
+	def test_nothing_dangles_once_frappe_has_caught_up(self):
+		"""The two halves in the order an install runs them."""
+		from frappe.utils.dashboard import sync_dashboards
+
+		self.wipe()
+		self.unlink("Academic Exclusions")
+
+		in_install = frappe.flags.in_install
+		try:
+			frappe.flags.in_install = "education_extension"
+			with desk._without_writing_to_the_source_tree():
+				desk.apply_desk_records()
+		finally:
+			frappe.flags.in_install = in_install
+
 		with desk._without_writing_to_the_source_tree():
-			sidebar.save()
+			sync_dashboards("education_extension")
+
+		sidebar = frappe.get_doc("Workspace Sidebar", desk.SOURCE)
+		self.assertEqual(desk._dangling_links(sidebar), [])
 
 	def test_a_dangling_row_is_reported_rather_than_fatal(self):
-		"""Fixing the cause is not the same as surviving the next one.
+		"""Surviving the ordering is not the same as hiding a real breakage.
 
-		A sidebar row this app did not add, pointing at something absent, should
-		not be able to stop an installation -- so the save ignores links and says
-		what dangled instead.
+		A sidebar row pointing at something absent must not stop an install, so the
+		save ignores links -- and then says what dangled, once an install is not
+		what is running.
 		"""
-		if not frappe.db.exists("Workspace Sidebar", desk.SOURCE):
-			self.skipTest("no sidebar on this site")
-
 		self.wipe()
 
 		sidebar = frappe.get_doc("Workspace Sidebar", desk.SOURCE)
 		sidebar.flags.ignore_permissions = True
-		# Without the link guard this is the failure, which is the proof that the
-		# guard below is doing something.
+		# Without the guard this is the failure, which is the proof the guard is
+		# doing something.
 		with desk._without_writing_to_the_source_tree():
 			with self.assertRaises(frappe.LinkValidationError):
 				sidebar.save()
@@ -395,6 +425,6 @@ def run_tests(verbosity=2):
 	"""Run these from a console, since bench run-tests cannot bootstrap this site."""
 	suite = unittest.TestSuite()
 	loader = unittest.TestLoader()
-	for case in (TestAppPage, TestCopyOntoEducation, TestTheRecordsFrappeWillNotImport):
+	for case in (TestAppPage, TestCopyOntoEducation, TestTheDashboardTheSidebarPointsAt):
 		suite.addTests(loader.loadTestsFromTestCase(case))
 	return unittest.TextTestRunner(verbosity=verbosity).run(suite)

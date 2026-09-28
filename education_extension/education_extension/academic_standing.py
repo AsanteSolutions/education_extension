@@ -51,6 +51,12 @@ WINDOW_SOURCES = {
 	LATEST_YEAR: ("Academic Year", "year_start_date"),
 }
 
+# How a student the rule has something to say about is named on a report. Here
+# rather than on either report, because both of them say it and two spellings of
+# the same state read as two different states.
+CANNOT_REGISTER = "Cannot register"
+ALLOWED_ANYWAY = "Allowed anyway"
+
 # Sorts a year or term with no start date on record behind every one that has
 # a date, rather than raising when the two are compared.
 _UNDATED = getdate("1900-01-01")
@@ -289,6 +295,13 @@ def standing_for(students, academic_term=None):
 def standing(student, academic_term=None):
 	"""How one student stands."""
 	return standing_for([student], academic_term)[student]
+
+
+def label(assessed):
+	"""What a report calls this standing, or "" for one it has nothing to say about."""
+	if not assessed["excluded"]:
+		return ""
+	return ALLOWED_ANYWAY if assessed["override"] else CANNOT_REGISTER
 
 
 def registration_block(student, academic_term=None):

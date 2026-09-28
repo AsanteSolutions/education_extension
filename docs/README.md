@@ -75,8 +75,8 @@ Once installed there is an **Education Extension** tile on the apps screen and
 an icon on the desk, which open a page holding everything below:
 
 - **Registration** — Registration Period, Registration Consent, Registration
-  Override, Registration Status report, Module Registrations report, Sign
-  Registration Forms, Registration Settings
+  Override, Registration Status report, Academic Exclusions report, Module
+  Registrations report, Sign Registration Forms, Registration Settings
 - **Marking** — Course Mark Sheet, Course Mark Scheme, Mark Change, Course
   Results report, Marking Settings
 - **Results and Remarks** — Academic Remark, Supplementary Academic Remark,

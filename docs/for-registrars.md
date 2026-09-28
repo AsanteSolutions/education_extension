@@ -89,6 +89,32 @@ is turning away, and **Allowed anyway** for one you have let through. Worth a
 glance before you chase anybody: a student who is barred is not going to
 register no matter how many times you ask.
 
+## Who the results rule has stopped
+
+Open the **Academic Exclusions** report and choose the semester. It lists only
+the students the academic standing rule has something to say about — not
+everybody — so it is a queue to work down rather than a roll to read.
+
+Each row carries the figures the decision rests on: how many modules failed out
+of how many taken, the rate, which modules, and **what it was counted over**.
+That last one is per student, not per setting: the window lands on the latest
+period each student actually has results in, so two students under the same rule
+can be judged over different semesters.
+
+Three columns tell you whether a row needs you at all:
+
+- **Standing** — *Cannot register* still needs a decision; *Allowed anyway* has
+  had one, and the permission, who granted it and why are in the last three
+  columns.
+- **Due to Take** — *Nothing this term* means the exclusion is not keeping them
+  out of anything right now.
+- **Registered** — *Yes* means they got in regardless, either under a permission
+  or before the rule was switched on.
+
+Filter by **Standing** to see just the students still barred. If no rule is
+switched on the report says so rather than showing you an empty table, which
+would read as "nobody is excluded".
+
 ## Letting a student register anyway
 
 The academic standing rule is arithmetic, and arithmetic is a poor judge of
@@ -98,8 +124,9 @@ that is in the failure count, and all of it is a reason you might say yes.
 
 So the rule is appealable, and you are the appeal.
 
-1. On the **Registration Status** report, press **Allow a Student to Register**.
-   The semester comes across with the report's filter.
+1. On either the **Academic Exclusions** or the **Registration Status** report,
+   press **Allow a Student to Register**. The semester comes across with the
+   report's filter.
 2. Choose the student. The figures the rule counted appear at the top of the
    form as soon as you do, so you are deciding in front of them rather than
    beside them.
@@ -170,12 +197,12 @@ because marking is not finished or because the remark code was never entered.
 Fixing the remark fixes the block.
 
 **"A student says they are blocked because of their results."**
-Open the Registration Status report for the semester and look at the Standing
-column. If it says *Cannot register*, the academic standing rule is turning them
-away and the figures are on the message they were shown. Check them: a module
-whose result was never captured counts as nothing, not as a pass, and a genuinely
-miscounted record is fixed by fixing the remark. If the figures are right and you
-still want the student in, see *Letting a student register anyway* above.
+Open the Academic Exclusions report for the semester and find them. The row
+carries the same figures the student was shown. Check them before anything else:
+a module whose result was never captured counts as nothing, not as a pass, so a
+gap in the records can bar somebody who does not deserve it — and that is fixed
+by fixing the remark, not here. If the figures are right and you still want the
+student in, see *Letting a student register anyway* above.
 
 **"A student cannot see a module that is definitely in their programme."**
 Check which semester the module runs in. Modules are only offered in the half of

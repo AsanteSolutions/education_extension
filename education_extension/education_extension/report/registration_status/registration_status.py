@@ -16,7 +16,11 @@ and need a person, and a comment on a submitted enrolment is not a queue.
 import frappe
 from frappe import _
 
-from education_extension.education_extension.academic_standing import rule, standing_for
+from education_extension.education_extension.academic_standing import (
+	label,
+	rule,
+	standing_for,
+)
 from education_extension.education_extension.doctype.student_progress_report.student_progress_report import (
 	_program_semester,
 	_semester_label,
@@ -29,12 +33,6 @@ from education_extension.education_extension.registration import (
 REGISTERED = "Registered"
 NOT_REGISTERED = "Not registered"
 NOT_THIS_TERM = "Not their term"
-
-# Only for a student the academic standing rule has something to say about, so
-# the column is empty for everyone it is fine with -- and for everyone, all of
-# it, where the institution has not turned the rule on.
-CANNOT_REGISTER = "Cannot register"
-ALLOWED_ANYWAY = "Allowed anyway"
 
 
 def execute(filters=None):
@@ -142,12 +140,13 @@ def standing_labels(students, academic_term):
 	if not (students and rule()):
 		return {}
 
-	labels = {}
-	for student, assessed in standing_for(students, academic_term).items():
-		if not assessed["excluded"]:
-			continue
-		labels[student] = ALLOWED_ANYWAY if assessed["override"] else CANNOT_REGISTER
-	return labels
+	# Empty for a student the rule is fine with, so the column carries only the
+	# people it has something to say about.
+	return {
+		student: label(assessed)
+		for student, assessed in standing_for(students, academic_term).items()
+		if label(assessed)
+	}
 
 
 def _registered_block(registered):

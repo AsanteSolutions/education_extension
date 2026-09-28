@@ -68,8 +68,30 @@
    "collapsible": 1,
    "indent": 0,
    "keep_closed": 0,
+   "label": "Registration Override",
+   "link_to": "Registration Override",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 1,
+   "collapsible": 1,
+   "indent": 0,
+   "keep_closed": 0,
    "label": "Registration Status",
    "link_to": "Registration Status",
+   "link_type": "Report",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 1,
+   "collapsible": 1,
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Academic Exclusions",
+   "link_to": "Academic Exclusions",
    "link_type": "Report",
    "show_arrow": 0,
    "type": "Link"
@@ -240,7 +262,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-09-21 12:00:00.000000",
+ "modified": "2026-09-28 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "Education Extension",
  "name": "Education Extension",

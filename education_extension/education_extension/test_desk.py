@@ -12,6 +12,8 @@ the code and wrong on the screen, so they are checked here instead.
     run_tests()
 """
 
+import glob
+import json
 import os
 import unittest
 
@@ -245,10 +247,154 @@ class TestCopyOntoEducation(IntegrationTestCase):
 		return state
 
 
+class TestTheRecordsFrappeWillNotImport(IntegrationTestCase):
+	"""The dashboard, its charts and its cards.
+
+	None of the three doctypes is in Frappe's IMPORTABLE_DOCTYPES, so nothing
+	reads the files this app ships them in and a clean install had none of them.
+	That was not cosmetic: the sidebar links to the dashboard, and the sidebar is
+	saved whenever there is a link to add, which Frappe refuses to do while a row
+	points at something it cannot resolve. It took an install down.
+
+	Two things here have to be kept away from the source tree, and both bit
+	during the writing of these tests. `delete_doc` on a standard record deletes
+	the file the app ships it in, so the wipe below is `frappe.db.delete`, which
+	is raw SQL and fires no hooks. And *saving* a standard record exports it back
+	over that file, so every save goes through `_without_writing_to_the_source_tree`
+	-- the same guard `desk` itself saves under. Without it these tests rewrote
+	the shipped sidebar from the database, which quietly repaired the very drift
+	one of them is here to detect.
+	"""
+
+	SHIPPED = (
+		("Number Card", "number_card"),
+		("Dashboard Chart", "dashboard_chart"),
+		("Dashboard", "education_extension_dashboard"),
+	)
+
+	def setUp(self):
+		needs_doctype(self, "Dashboard", "Dashboard Chart", "Number Card")
+
+	def tearDown(self):
+		frappe.db.rollback()
+		frappe.clear_cache()
+
+	def wipe(self):
+		"""The state a fresh install is in before `apply_desk_records` runs."""
+		dashboards = list(self.shipped_names("education_extension_dashboard"))
+		for table in ("Dashboard Chart Link", "Number Card Link"):
+			frappe.db.delete(table, {"parent": ["in", dashboards]})
+		for doctype, _folder in self.SHIPPED:
+			frappe.db.delete(doctype, {"module": "Education Extension"})
+		frappe.clear_cache()
+
+	def shipped_names(self, folder):
+		pattern = os.path.join(
+			frappe.get_app_path("education_extension", "education_extension", folder), "*", "*.json"
+		)
+		return {json.load(open(path, encoding="utf-8"))["name"] for path in glob.glob(pattern)}
+
+	def test_the_shipped_sidebar_file_lists_what_the_shipped_page_file_does(self):
+		"""Read off the files, not the database.
+
+		`fill_in_our_own_sidebar` repairs a sidebar record that has fallen behind
+		the page, which is why the two files drifting apart went unnoticed for as
+		long as it did -- every site looked right. The files are what a fresh
+		install starts from, so they are what this checks.
+		"""
+		def read(*parts):
+			with open(frappe.get_app_path("education_extension", *parts), encoding="utf-8") as f:
+				return json.load(f)
+
+		page = read("education_extension", "workspace", "education_extension", "education_extension.json")
+		sidebar = read("workspace_sidebar", "education_extension.json")
+
+		on_page = {row["link_to"] for row in page["links"] if row["type"] == "Link"}
+		# The sidebar carries navigation the page has no equivalent of -- its own
+		# Home link and the dashboard -- so those link types are left out rather
+		# than those links.
+		in_sidebar = {
+			row["link_to"]
+			for row in sidebar["items"]
+			if row["type"] == "Link" and row["link_type"] in ("DocType", "Report", "Page")
+		}
+		self.assertEqual(on_page, in_sidebar)
+
+	def test_every_record_this_app_ships_is_created_on_a_clean_install(self):
+		self.wipe()
+		for doctype, _folder in self.SHIPPED:
+			self.assertEqual(
+				frappe.db.count(doctype, {"module": "Education Extension"}),
+				0,
+				"{0} survived the wipe".format(doctype),
+			)
+
+		desk.apply_desk_records()
+
+		for doctype, folder in self.SHIPPED:
+			present = set(
+				frappe.get_all(doctype, filters={"module": "Education Extension"}, pluck="name")
+			)
+			self.assertEqual(present, self.shipped_names(folder), doctype)
+
+	def test_making_them_twice_makes_nothing_twice(self):
+		"""It runs on every migrate, not only on install."""
+		before = {
+			doctype: frappe.db.count(doctype, {"module": "Education Extension"})
+			for doctype, _folder in self.SHIPPED
+		}
+		desk.apply_desk_records()
+		after = {
+			doctype: frappe.db.count(doctype, {"module": "Education Extension"})
+			for doctype, _folder in self.SHIPPED
+		}
+		self.assertEqual(before, after)
+
+	def test_the_sidebar_can_be_saved_once_they_are_there(self):
+		"""The line the install actually died on."""
+		if not frappe.db.exists("Workspace Sidebar", desk.SOURCE):
+			self.skipTest("no sidebar on this site")
+
+		self.wipe()
+		desk.apply_desk_records()
+
+		sidebar = frappe.get_doc("Workspace Sidebar", desk.SOURCE)
+		sidebar.flags.ignore_permissions = True
+		with desk._without_writing_to_the_source_tree():
+			sidebar.save()
+
+	def test_a_dangling_row_is_reported_rather_than_fatal(self):
+		"""Fixing the cause is not the same as surviving the next one.
+
+		A sidebar row this app did not add, pointing at something absent, should
+		not be able to stop an installation -- so the save ignores links and says
+		what dangled instead.
+		"""
+		if not frappe.db.exists("Workspace Sidebar", desk.SOURCE):
+			self.skipTest("no sidebar on this site")
+
+		self.wipe()
+
+		sidebar = frappe.get_doc("Workspace Sidebar", desk.SOURCE)
+		sidebar.flags.ignore_permissions = True
+		# Without the link guard this is the failure, which is the proof that the
+		# guard below is doing something.
+		with desk._without_writing_to_the_source_tree():
+			with self.assertRaises(frappe.LinkValidationError):
+				sidebar.save()
+
+		sidebar = frappe.get_doc("Workspace Sidebar", desk.SOURCE)
+		sidebar.flags.ignore_permissions = True
+		sidebar.flags.ignore_links = True
+		with desk._without_writing_to_the_source_tree():
+			sidebar.save()
+		self.assertTrue(desk._dangling_links(sidebar), "the dashboard should be reported missing")
+
+
 def run_tests(verbosity=2):
 	"""Run these from a console, since bench run-tests cannot bootstrap this site."""
 	suite = unittest.TestSuite()
 	loader = unittest.TestLoader()
-	for case in (TestAppPage, TestCopyOntoEducation):
+	for case in (TestAppPage, TestCopyOntoEducation, TestTheRecordsFrappeWillNotImport):
 		suite.addTests(loader.loadTestsFromTestCase(case))
 	return unittest.TextTestRunner(verbosity=verbosity).run(suite)

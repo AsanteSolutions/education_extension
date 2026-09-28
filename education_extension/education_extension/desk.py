@@ -24,6 +24,7 @@ What it copies is read off this app's own workspace rather than listed here as
 well, so a doctype added to the page turns up in both places.
 """
 
+import glob
 import json
 import os
 from contextlib import contextmanager
@@ -55,6 +56,11 @@ def apply_desk_records():
 	# The sidebar first: the icon links to it.
 	ensure_standard_record("Workspace Sidebar", "workspace_sidebar")
 	ensure_standard_record("Desktop Icon", "desktop_icon")
+	# Then the dashboard, which the sidebar links to. Its cards and charts before
+	# it, because it is the thing that holds them.
+	ensure_module_records("Number Card", "number_card")
+	ensure_module_records("Dashboard Chart", "dashboard_chart")
+	ensure_module_records("Dashboard", "education_extension_dashboard")
 	fill_in_our_own_sidebar()
 	add_to_education_workspace()
 
@@ -103,35 +109,65 @@ def ensure_standard_record(doctype, folder):
 	already in the database is left alone rather than being overwritten from the
 	app on every migrate.
 	"""
+	_create_from_file(
+		doctype, frappe.get_app_path("education_extension", folder, "education_extension.json")
+	)
+
+
+def ensure_module_records(doctype, folder):
+	"""Create every record of `doctype` this app ships inside its module folder.
+
+	The same gap as above, one level in. Frappe exports a Dashboard, a Dashboard
+	Chart and a Number Card to <module>/<folder>/<name>/<name>.json and imports
+	none of the three: not one of them is in IMPORTABLE_DOCTYPES. So on a clean
+	install this app's registration dashboard did not exist, nor its four charts
+	or six cards, and the sidebar row linking to the dashboard pointed at nothing.
+
+	That was fatal rather than untidy. The sidebar is saved below whenever there
+	is a link to add, and Frappe refuses to save a document holding a link it
+	cannot resolve. It stayed hidden for as long as it did because nothing ever
+	needed adding -- the shipped sidebar already listed everything the workspace
+	had. The first link to appear on one and not the other took the next install
+	down with it.
+	"""
+	pattern = os.path.join(
+		frappe.get_app_path("education_extension", "education_extension", folder), "*", "*.json"
+	)
+	for path in sorted(glob.glob(pattern)):
+		_create_from_file(doctype, path)
+
+
+def _create_from_file(doctype, path):
+	"""Insert the record described by `path`, unless it is already there."""
 	if not frappe.db.exists("DocType", doctype):
 		# An older Frappe, or one built without that part of the desk.
 		return
-	if frappe.db.exists(doctype, SOURCE):
-		return
-
-	path = frappe.get_app_path("education_extension", folder, "education_extension.json")
 	if not os.path.exists(path):
 		return
 
 	with open(path, encoding="utf-8") as handle:
 		record = json.load(handle)
 
+	name = record.get("name")
+	if not name or frappe.db.exists(doctype, name):
+		return
+
 	# Left to Frappe, rather than carrying the file's own.
 	for stamp in ("creation", "modified", "owner", "modified_by", "idx", "docstatus"):
 		record.pop(stamp, None)
 
 	doc = frappe.get_doc(record)
-	# What Frappe's own importer does for a standard record — import_file.py sets
+	# What Frappe's own importer does for a standard record: import_file.py sets
 	# the same flag before inserting. Without it these validate their links while
-	# the site is still being built: the icon points at the sidebar, and the
-	# sidebar points at a dashboard that is synced later still. A record arriving
-	# a moment early should not take the installation down with it.
+	# the site is still being built -- the icon points at the sidebar, and the
+	# dashboard at cards and charts made a moment earlier in the same pass. A
+	# record arriving early should not take the installation down with it.
 	doc.flags.ignore_links = True
 
 	with _without_writing_to_the_source_tree():
 		doc.insert(ignore_permissions=True)
 
-	print("Education Extension: created {0} {1}".format(doctype, SOURCE))
+	print("Education Extension: created {0} {1}".format(doctype, name))
 
 
 def add_to_education_workspace():
@@ -414,8 +450,42 @@ def _add_sidebar_items(cards, name=TARGET):
 
 	_resequence(sidebar.items)
 	sidebar.flags.ignore_permissions = True
+	# The same flag Frappe sets on its own standard records, for the same reason:
+	# this runs mid-install, where a row can point at something not made yet. The
+	# rows added above are checked by `_exists` before they go in, so what it
+	# covers is rows this app did not add -- and one of those dangling should not
+	# be able to take an installation down. It is reported instead.
+	sidebar.flags.ignore_links = True
 	sidebar.save()
+	_report_dangling_links(sidebar)
 	return added
+
+
+def _dangling_links(sidebar):
+	"""Sidebar rows pointing at something that is not installed."""
+	return sorted(
+		{
+			row.link_to
+			for row in sidebar.items
+			if row.type == "Link" and row.link_to and not _exists(row.link_to, row.link_type)
+		}
+	)
+
+
+def _report_dangling_links(sidebar):
+	"""Say so when a sidebar row points at something that is not there.
+
+	Saved past rather than refused, so without this nothing would mention it at
+	all. Printed rather than logged: the moment it matters is an install, and an
+	install is a terminal somebody is watching.
+	"""
+	dangling = _dangling_links(sidebar)
+	if dangling:
+		print(
+			"Education Extension: {0} sidebar links to something not installed: {1}".format(
+				sidebar.name, ", ".join(dangling)
+			)
+		)
 
 
 def _place_section(sidebar, label, icon, wanted):

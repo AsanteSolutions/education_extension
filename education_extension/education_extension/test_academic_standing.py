@@ -386,14 +386,182 @@ class TestTheOverride(IntegrationTestCase):
 		self.turn_the_rule_on()
 		self.assertEqual(
 			report.standing_labels([self.student], self.term),
-			{self.student: report.CANNOT_REGISTER},
+			{self.student: standing.CANNOT_REGISTER},
 		)
 
 		self.grant().submit()
 		self.assertEqual(
 			report.standing_labels([self.student], self.term),
-			{self.student: report.ALLOWED_ANYWAY},
+			{self.student: standing.ALLOWED_ANYWAY},
 		)
+
+
+class TestTheExclusionsReport(IntegrationTestCase):
+	"""The queue of students the rule has stopped."""
+
+	def setUp(self):
+		needs_education_app(self)
+		needs_doctype(self, "Registration Override", "Academic Term", "Academic Remark")
+
+		terms = frappe.get_all("Academic Term", limit=1, pluck="name")
+		if not terms:
+			self.skipTest("this site has no academic terms")
+		self.term = terms[0]
+
+		self.student = a_student_who_has_failed()
+		if not self.student:
+			self.skipTest("no student on this site has a failure on record")
+
+		from education_extension.education_extension.report.academic_exclusions import (
+			academic_exclusions as report,
+		)
+
+		self.report = report
+
+	def tearDown(self):
+		frappe.db.rollback()
+		frappe.clear_cache(doctype="Registration Settings")
+
+	def turn_the_rule_on(self, most=1):
+		settings = frappe.get_doc("Registration Settings")
+		settings.block_on_failed_modules = 1
+		settings.maximum_failed_modules = most
+		settings.maximum_failure_rate = 0
+		settings.failure_window = standing.WHOLE_RECORD
+		settings.save()
+		frappe.clear_cache(doctype="Registration Settings")
+
+	def run_report(self, **filters):
+		result = self.report.execute(dict({"academic_term": self.term}, **filters))
+		return result[1], (result[2] if len(result) > 2 else None)
+
+	def find(self, rows, student):
+		return next((row for row in rows if row["student"] == student), None)
+
+	def test_it_says_so_rather_than_showing_an_empty_table_when_no_rule_is_set(self):
+		"""Nobody excluded and no rule to exclude anybody look identical otherwise,
+		and they are very different things to tell a registrar."""
+		if frappe.db.get_single_value("Registration Settings", "block_on_failed_modules"):
+			self.skipTest("this site has turned the rule on")
+
+		rows, message = self.run_report()
+		self.assertEqual(rows, [])
+		self.assertTrue(message)
+		self.assertIn("Registration Settings", message)
+
+	def test_it_needs_a_term(self):
+		with self.assertRaises(frappe.ValidationError):
+			self.report.execute({})
+
+	def test_an_excluded_student_appears_with_the_figures_behind_it(self):
+		self.turn_the_rule_on()
+		rows, _message = self.run_report()
+
+		row = self.find(rows, self.student)
+		self.assertIsNotNone(row, "the student the rule is stopping is not on the list")
+		self.assertEqual(row["standing"], standing.CANNOT_REGISTER)
+
+		assessed = standing.standing(self.student, self.term)
+		self.assertEqual(row["failed"], assessed["failed"])
+		self.assertEqual(row["attempted"], assessed["attempted"])
+		self.assertEqual(row["rate"], assessed["rate"])
+		self.assertEqual(row["failed_modules"], ", ".join(assessed["failed_modules"]))
+		self.assertFalse(row["override"], "nobody has permitted this student")
+
+	def test_a_permitted_student_stays_on_the_list_with_the_permission_beside_them(self):
+		"""Dropping them would answer "who is excluded" and lose "who was let
+		through, by whom, and why" — which is the half an auditor asks about."""
+		self.turn_the_rule_on()
+		override = frappe.get_doc(
+			{
+				"doctype": "Registration Override",
+				"student": self.student,
+				"academic_term": self.term,
+				"reason": "Hospitalised for most of the second semester.",
+			}
+		)
+		override.insert()
+		override.submit()
+
+		row = self.find(self.run_report()[0], self.student)
+		self.assertEqual(row["standing"], standing.ALLOWED_ANYWAY)
+		self.assertEqual(row["override"], override.name)
+		self.assertEqual(row["granted_by"], frappe.session.user)
+		self.assertIn("Hospitalised", row["reason"])
+
+	def test_the_standing_filter_narrows_to_one_state(self):
+		self.turn_the_rule_on()
+
+		barred = self.run_report(standing=standing.CANNOT_REGISTER)[0]
+		self.assertTrue(self.find(barred, self.student))
+		self.assertTrue(all(row["standing"] == standing.CANNOT_REGISTER for row in barred))
+
+		permitted = self.run_report(standing=standing.ALLOWED_ANYWAY)[0]
+		self.assertIsNone(self.find(permitted, self.student))
+
+	def test_nobody_the_rule_is_content_with_is_listed(self):
+		"""It is a queue, not a roll. Everybody else is on Registration Status."""
+		self.turn_the_rule_on()
+		rows, _message = self.run_report()
+
+		self.assertTrue(rows, "nothing to check")
+		self.assertTrue(all(row["standing"] for row in rows))
+		for row in rows:
+			self.assertTrue(
+				standing.standing(row["student"], self.term)["excluded"], row["student"]
+			)
+
+	def test_the_students_still_barred_come_first(self):
+		"""The ones needing a decision, ahead of the ones already decided."""
+		self.turn_the_rule_on()
+		rows = self.run_report()[0]
+		if len(rows) < 2:
+			self.skipTest("too few excluded students to order")
+
+		# Permit the one the sort has put first, so the two states exist and the
+		# permitted one has to move.
+		frappe.get_doc(
+			{
+				"doctype": "Registration Override",
+				"student": rows[0]["student"],
+				"academic_term": self.term,
+				"reason": "Letting this one through.",
+			}
+		).insert().submit()
+
+		rows = self.run_report()[0]
+		barred = [i for i, row in enumerate(rows) if row["standing"] == standing.CANNOT_REGISTER]
+		permitted = [i for i, row in enumerate(rows) if row["standing"] == standing.ALLOWED_ANYWAY]
+
+		self.assertTrue(barred and permitted, "both states should be present now")
+		self.assertLess(max(barred), min(permitted))
+
+	def test_the_filter_offers_exactly_the_states_the_rule_produces(self):
+		"""The Select is written out in the .js, so nothing but this stops the two
+		drifting into two spellings of the same state."""
+		source = frappe.read_file(
+			frappe.get_app_path(
+				"education_extension",
+				"education_extension",
+				"report",
+				"academic_exclusions",
+				"academic_exclusions.js",
+			)
+		)
+		for state in (standing.CANNOT_REGISTER, standing.ALLOWED_ANYWAY):
+			self.assertIn("'{0}'".format(state), source)
+
+	def test_it_asks_for_the_whole_cohort_in_a_fixed_number_of_queries(self):
+		"""It runs over every student with results, and a query per student is how
+		a report becomes one nobody opens.
+
+		The bound is a little above what it takes today, so ordinary framework
+		churn does not fail it. A query per student would be a hundred and eighty
+		over, which is the shape this is here to catch.
+		"""
+		self.turn_the_rule_on()
+		with self.assertQueryCount(35):
+			self.run_report()
 
 
 class TestTheWindowsReadRealDates(IntegrationTestCase):
@@ -501,6 +669,7 @@ def run_tests(verbosity=2):
 	for case in (
 		TestTheRule,
 		TestTheOverride,
+		TestTheExclusionsReport,
 		TestTheWindowsReadRealDates,
 		TestTheRuleIsOffUntilSomebodyTurnsItOn,
 	):

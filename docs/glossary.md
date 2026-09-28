@@ -114,6 +114,8 @@ the `SUPP` code. Reported in a column of its own so both attempts stay visible.
 | Name | What it shows |
 |---|---|
 | **Registration Status** | Every student for a semester: registered, not registered, or not due. The list a registrar chases from. |
+| **Academic Exclusions** | Only the students the academic standing rule has stopped, with the figures behind each one and any permission granted. |
+| **Module Registrations** | Who is registered for one module in a semester, in mark-sheet order. |
 | **Course Results** | A course's results for QA to review and record outcome codes against. |
 | **Registration Dashboard** | Six numbers and four charts on how a registration window is going. |
 | **Proof of Registration** | A printable confirmation of a student's registration, from their Registration Consent. |

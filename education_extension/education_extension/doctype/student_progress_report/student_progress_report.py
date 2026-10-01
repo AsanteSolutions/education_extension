@@ -47,6 +47,19 @@ class StudentProgressReport(Document):
 
 @frappe.whitelist()
 def preview_progress_report(doc):
+    # Whitelisting opens an endpoint to every logged-in user; it does not apply
+    # the doctype's own permissions. This one names its student in its argument
+    # and reads through `frappe.get_all`, which ignores permissions by design, so
+    # without this check posting somebody else's student id returned their whole
+    # record -- marks, ID number and remarks -- as a PDF. That went around the
+    # User Permission confinement in `student_permissions` and around the
+    # `is_released` gate the portal is held to, in one request.
+    #
+    # Checked against the doctype rather than a role list of its own, because the
+    # form that calls this is that doctype: whoever may open the tool may use it,
+    # and the two cannot drift apart.
+    frappe.has_permission("Student Progress Report", ptype="read", throw=True)
+
     # `doc` arrives as a JSON string from the desk form; tolerate an already-parsed
     # dict so the endpoint also works when called with a JSON request body.
     doc = frappe._dict(json.loads(doc) if isinstance(doc, str) else doc)
@@ -97,11 +110,24 @@ def preview_progress_report(doc):
 
     # Streamed straight back as PDF bytes; the desk form fetches this as a blob and
     # saves it under the filename set here.
-    frappe.response.filename = "Progress Report - {}.pdf".format(
-        doc.student_name or doc.student or ""
+    frappe.response.filename = "Progress Report - {0}.pdf".format(
+        _filename_for(doc.student)
     )
     frappe.response.filecontent = get_pdf(final_template)
     frappe.response.type = "pdf"
+
+
+def _filename_for(student):
+    """The student's name, as the record holds it and fit for a header.
+
+    Read rather than taken from the request, which also carries a
+    `student_name`: it ends up in a Content-Disposition header, and a caller
+    should not be choosing what goes there. Only the characters that would break
+    the header or walk a path are dropped, so an O'Brien stays an O'Brien.
+    """
+    name = frappe.db.get_value("Student", student, "student_name") or student or ""
+    return re.sub(r'[\r\n"\\/;]', "", name).strip() or "Student"
+
 
 def get_identity_number(doc):
 	"""The student's national ID, stored on the Student as a custom field."""

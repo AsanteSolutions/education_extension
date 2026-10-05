@@ -41,8 +41,16 @@ function edit_remark(student, doctype, fieldname, title) {
 				],
 				(values) => {
 					const comment = values[fieldname] || ''
-					const done = () => {
-						frappe.show_alert({ message: __('Comment saved'), indicator: 'green' })
+					// Choosing the blank option withdraws the comment, so saying
+					// "saved" would describe the opposite of what happened. The
+					// server returns the record the comment now lives on, or null
+					// when there is none because it has just been withdrawn.
+					const done = (record) => {
+						frappe.show_alert(
+							record
+								? { message: __('Comment saved'), indicator: 'green' }
+								: { message: __('Comment withdrawn'), indicator: 'orange' },
+						)
 						report.refresh()
 					}
 
@@ -57,7 +65,7 @@ function edit_remark(student, doctype, fieldname, title) {
 							supplementary: doctype === 'Supplementary Academic Remark' ? 1 : 0,
 						},
 						callback: (r) => {
-							if (!r.exc) done()
+							if (!r.exc) done(r.message)
 						},
 					})
 				},

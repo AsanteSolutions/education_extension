@@ -60,12 +60,23 @@ class MarkChange(Document):
 			)
 
 	def find_mark(self):
-		"""Where this mark lives, as (doctype, name, current score).
+		"""Where this mark lives, as (doctype, name, current score, sheet).
 
 		The sheet is looked at first, because a course with an approved sheet is
 		read from it and changing the Assessment Result instead would change
 		nothing anybody sees.
 		"""
+		from education_extension.education_extension.marking import sitting_of
+
+		# What this change is for, normalised the way a mark is. An aegrotat paper
+		# can be named either way round — "AEGRO Theory Exam" carrying no sitting,
+		# which is what the standard Assessment Result form produces because
+		# nothing on it prompts for one, or "Theory Exam" with the sitting set —
+		# and both have to find the same mark.
+		group, sitting = sitting_of(
+			{"assessment_group": self.assessment_group, "sitting": self.sitting}
+		)
+
 		entry = frappe.db.sql(
 			"""
 			select entry.name, entry.raw_score, sheet.name as sheet
@@ -79,26 +90,43 @@ class MarkChange(Document):
 			  and entry.assessment_group = %(assessment_group)s
 			limit 1
 			""",
-			self.as_dict(),
+			{
+				"course": self.course,
+				"academic_term": self.academic_term,
+				"student": self.student,
+				"sitting": sitting,
+				"assessment_group": group,
+			},
 			as_dict=True,
 		)
 		if entry:
 			return ("Course Mark Sheet Entry", entry[0].name, entry[0].raw_score, entry[0].sheet)
 
-		result = frappe.get_all(
+		# Resolved rather than filtered. A result's sitting lives in
+		# `custom_sitting` where it is set and in the assessment group's name
+		# where it is not, so no single filter finds both — and filtering on
+		# neither, which is what this did, rewrote whichever row the database
+		# happened to return first. An aegrotat re-mark landed on the main paper,
+		# and `previous_score`, the audit comment and `applied_to_name` all
+		# recorded the wrong one.
+		#
+		# `sitting_of` is the readers' own function, so a re-mark lands on the
+		# mark the reports are actually reading.
+		for result in frappe.get_all(
 			"Assessment Result",
-			fields=["name", "total_score"],
+			fields=["name", "total_score", "assessment_group", "custom_sitting as sitting"],
 			filters={
 				"student": self.student,
 				"course": self.course,
 				"academic_term": self.academic_term,
-				"assessment_group": self.assessment_group,
 				"docstatus": 1,
 			},
-			limit=1,
-		)
-		if result:
-			return ("Assessment Result", result[0].name, result[0].total_score, None)
+			# Deterministic, and the newest wins where a sitting somehow has two:
+			# an amended result supersedes the one it was amended from.
+			order_by="creation desc",
+		):
+			if sitting_of(result) == (group, sitting):
+				return ("Assessment Result", result.name, result.total_score, None)
 
 		return None
 

@@ -325,6 +325,19 @@ function render_mark_entry(frm) {
 						indicator: r.message.outstanding ? 'orange' : 'green',
 					})
 				}
+				// Said out loud rather than left to be noticed. The adjustment
+				// was worked out from marks that have just changed, so it comes
+				// off — and a moderation that disappears quietly is how a sheet
+				// gets approved by someone who thinks it is still adjusted.
+				if (r.message && r.message.moderation_withdrawn) {
+					frappe.msgprint({
+						title: __('Moderation removed'),
+						message: __(
+							'This sheet had been moderated. Changing a mark takes the adjustment off, because it was worked out from the marks as they were. The raw marks stand; moderate again before approving.',
+						),
+						indicator: 'orange',
+					})
+				}
 				frm.reload_doc()
 			})
 			.catch(() => $save.prop('disabled', false))

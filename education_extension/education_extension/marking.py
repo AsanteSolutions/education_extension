@@ -439,12 +439,20 @@ def get_remark_codes(supplementary=0):
 
 @frappe.whitelist()
 def set_course_remark(student, course, academic_year, academic_term, comment, supplementary=0):
-	"""Record QA's comment on a result, creating it or replacing what was there.
+	"""Record QA's comment on a result: file it, replace it, or withdraw it.
 
 	Server-side because the client cannot do it correctly: these records are
-	submittable, so inserting one leaves a draft that nothing reads, and writing
-	to a submitted one needs the field to allow it. Both are handled here so a
-	comment either lands where the reports look or fails loudly.
+	submittable, so inserting one leaves a draft that nothing reads, writing to a
+	submitted one needs the field to allow it, and withdrawing one is a cancel
+	rather than a blank. All three are handled here so a comment either lands
+	where the reports look or fails loudly.
+
+	An empty comment means withdraw. The dialog opens on whatever is already
+	filed, so choosing the blank option is a deliberate act and not an absence of
+	input -- which is why it is not simply ignored here.
+
+	Returns the record a comment now lives on, or None when there is none to
+	point at: nothing was filed, or what was filed has just been withdrawn.
 	"""
 	frappe.only_for(("Academics User", "Education Manager", "System Manager"))
 
@@ -497,6 +505,23 @@ def set_course_remark(student, course, academic_year, academic_term, comment, su
 		draft.save()
 		draft.submit()
 		return draft.name
+
+	if not comment:
+		# Withdrawing a filed comment. It cannot be done by blanking the field:
+		# the field is required, so a remark with no remark on it is not a
+		# record of anything. It would also be invisible rather than absent --
+		# every reader tests the field and skips the row, so the comment would
+		# vanish from the reports while `validate_every_student_has_a_comment`
+		# went on refusing to approve the sheet for want of one, with nothing
+		# anywhere saying it had been cleared.
+		#
+		# Cancelled rather than deleted. A judgement that was filed and then
+		# taken back is part of what QA did, and cancelling keeps it: readers
+		# filter on submitted so it leaves the reports at once, and the lookup
+		# above ignores it so the next comment files cleanly against a new
+		# record.
+		frappe.get_doc(doctype, record.name).cancel()
+		return None
 
 	frappe.db.set_value(doctype, record.name, fieldname, comment)
 	return record.name

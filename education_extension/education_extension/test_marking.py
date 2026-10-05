@@ -3,6 +3,8 @@
 
 import unittest
 
+import frappe
+from frappe.tests import IntegrationTestCase
 from frappe.tests.utils import FrappeTestCase
 
 from education_extension.education_extension.doctype.course_mark_scheme.course_mark_scheme import (
@@ -18,6 +20,7 @@ from education_extension.education_extension.marking import (
 	LEGACY_EMPTY_KEYS,
 	MAIN,
 	SUPPLEMENTARY,
+	_course_remarks,
 	_merge_sheet_marks,
 	_supplementary_marks,
 	calculate_course_mark,
@@ -25,7 +28,12 @@ from education_extension.education_extension.marking import (
 	legacy_course_marks,
 	remark_codes,
 	resolve_results,
+	set_course_remark,
 	sitting_of,
+)
+from education_extension.education_extension.testing import (
+	needs_doctype,
+	needs_education_app,
 )
 
 # One course per shape the marking rules recognise.
@@ -417,6 +425,137 @@ class TestEverySittingCanBeReleased(FrappeTestCase):
 		self.assertEqual(KIND_FOR_SITTING[""], KIND_FOR_SITTING[MAIN])
 
 
+class TestFilingAndWithdrawingAComment(IntegrationTestCase):
+	"""`set_course_remark` over the whole life of one comment.
+
+	The comment field is `reqd`, so there is no such thing as a remark with no
+	remark on it. Withdrawing one therefore has to cancel the record: blanking
+	the field left it submitted but invisible -- every reader tests the field and
+	skips the row -- while the mark sheet went on refusing approval for want of a
+	comment nobody could see had been erased.
+	"""
+
+	def setUp(self):
+		needs_education_app(self)
+		needs_doctype(self, "Academic Remark", "Assessment Result")
+
+		self.keys = keys_with_no_comment_yet()
+		if not self.keys:
+			self.skipTest("every student already has a comment on that course and term")
+
+		self.codes = remark_codes("Academic Remark")
+		if len(self.codes) < 2:
+			self.skipTest("Academic Remark offers fewer than two codes")
+
+	def tearDown(self):
+		frappe.db.rollback()
+
+	def file(self, comment):
+		return set_course_remark(comment=comment, **self.keys)
+
+	def submitted(self):
+		return frappe.get_all(
+			"Academic Remark", filters=dict(self.keys, docstatus=1), pluck="name"
+		)
+
+	def test_the_whole_life_of_one_comment(self):
+		first = self.file(self.codes[0])
+		self.assertEqual(self.submitted(), [first], "filing did not leave one submitted record")
+		self.assertEqual(frappe.db.get_value("Academic Remark", first, "remark"), self.codes[0])
+
+		# Replacing writes in place, on the same record.
+		self.assertEqual(self.file(self.codes[1]), first)
+		self.assertEqual(frappe.db.get_value("Academic Remark", first, "remark"), self.codes[1])
+
+		# Withdrawing cancels it, and says so by returning nothing to point at.
+		self.assertIsNone(self.file(""))
+		self.assertEqual(self.submitted(), [], "a withdrawn comment is still on file")
+		self.assertEqual(frappe.db.get_value("Academic Remark", first, "docstatus"), 2)
+
+	def test_the_judgement_itself_is_kept(self):
+		"""Cancelled, not blanked. What QA decided, and then took back, is part
+		of what QA did."""
+		name = self.file(self.codes[0])
+		self.file("")
+
+		self.assertEqual(
+			frappe.db.get_value("Academic Remark", name, "remark"),
+			self.codes[0],
+			"withdrawing erased the comment instead of cancelling the record",
+		)
+
+	def test_a_withdrawn_comment_leaves_the_reports(self):
+		self.file(self.codes[0])
+		self.assertIn(self.keys["student"], self.course_remarks())
+
+		self.file("")
+		self.assertNotIn(
+			self.keys["student"],
+			self.course_remarks(),
+			"a withdrawn comment is still being reported",
+		)
+
+	def test_a_comment_can_be_filed_again_afterwards(self):
+		"""The lookup skips cancelled records, so the next one files cleanly
+		rather than colliding with what was withdrawn."""
+		first = self.file(self.codes[0])
+		self.file("")
+		second = self.file(self.codes[1])
+
+		self.assertNotEqual(second, first)
+		self.assertEqual(self.submitted(), [second])
+
+	def test_withdrawing_when_nothing_was_filed_does_nothing(self):
+		self.assertIsNone(self.file(""))
+		self.assertEqual(self.submitted(), [])
+
+	def test_no_submitted_remark_is_ever_left_blank(self):
+		"""The shape of the bug, asserted directly: whatever the sequence, a
+		submitted record always carries a comment."""
+		for comment in (self.codes[0], "", self.codes[1], "", ""):
+			self.file(comment)
+			blank = [
+				name
+				for name in self.submitted()
+				if not (frappe.db.get_value("Academic Remark", name, "remark") or "").strip()
+			]
+			self.assertEqual(blank, [], "a submitted remark was left with no comment on it")
+
+	def course_remarks(self):
+		return _course_remarks(
+			self.keys["course"], self.keys["academic_term"], "Academic Remark", "remark"
+		)
+
+
+def keys_with_no_comment_yet():
+	"""Student, course and term that QA has not commented on, or None.
+
+	The links are found rather than made — building a Student and a Course inside
+	the test would mean constructing the records it is meant to be writing
+	against — but the combination need not be one anybody actually sat. An
+	Academic Remark requires only that the four links resolve, and on a site
+	where every real sitting already carries a comment there would otherwise be
+	nothing free to write to.
+	"""
+	term = frappe.db.get_value(
+		"Academic Term", {"academic_year": ["is", "set"]}, ["name", "academic_year"], as_dict=True
+	)
+	course = frappe.db.get_value("Course", {}, "name")
+	if not (term and course):
+		return None
+
+	for student in frappe.get_all("Student", pluck="name", limit=200):
+		keys = {
+			"student": student,
+			"course": course,
+			"academic_year": term.academic_year,
+			"academic_term": term.name,
+		}
+		if not frappe.db.exists("Academic Remark", dict(keys, docstatus=["<", 2])):
+			return keys
+	return None
+
+
 def run_tests(verbosity=2):
 	"""Run these from a console, since bench run-tests cannot bootstrap this site."""
 	suite = unittest.TestSuite()
@@ -426,6 +565,7 @@ def run_tests(verbosity=2):
 		TestSheetsAndSittings,
 		TestLegacyFallbackShape,
 		TestEverySittingCanBeReleased,
+		TestFilingAndWithdrawingAComment,
 	):
 		suite.addTests(loader.loadTestsFromTestCase(case))
 	return unittest.TextTestRunner(verbosity=verbosity).run(suite)

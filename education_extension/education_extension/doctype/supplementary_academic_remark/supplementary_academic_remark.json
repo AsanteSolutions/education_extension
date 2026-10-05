@@ -84,7 +84,7 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-07-15 12:37:34.654797",
+ "modified": "2026-10-05 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "Education Extension",
  "name": "Supplementary Academic Remark",
@@ -92,6 +92,8 @@
  "owner": "Administrator",
  "permissions": [
   {
+   "amend": 1,
+   "cancel": 1,
    "create": 1,
    "delete": 1,
    "email": 1,

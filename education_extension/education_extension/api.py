@@ -28,11 +28,40 @@ PORTAL_STUDENT_FIELDS = [
 
 
 def _current_user_student():
-	"""The Student record linked to the logged-in user, if any."""
+	"""The Student record linked to the logged-in user, if any.
+
+	This is how the portal decides who it is talking to: `my_options`, `register`
+	and `get_student_grades` all take their student from here rather than from the
+	caller, so everything a student may see or do rests on this one lookup.
+
+	Which is why it refuses to choose. `Student.user` carries no unique
+	constraint and the education app's controller only ever sets the field, so
+	nothing upstream stops two students sharing an account — and the lookup this
+	replaced had no ordering either, so it answered with whichever row the
+	database felt like and could answer differently on the next call. A student
+	shown another student's marks, or registered against the wrong record, is
+	worse in every way than being told to go to the office.
+
+	`student_permissions.on_student_validate` stops the pair being made in the
+	first place. This is for the pair that got in before it, or around it.
+	"""
 	user = frappe.session.user
 	if user in ("Guest", "Administrator"):
 		return None
-	return frappe.db.get_value("Student", {"user": user}, "name")
+
+	students = frappe.get_all(
+		"Student", filters={"user": user}, pluck="name", order_by="creation asc", limit=2
+	)
+	if len(students) > 1:
+		frappe.throw(
+			frappe._(
+				"Your account is linked to more than one student record, so this page "
+				"cannot tell which one is yours. The academic office needs to put that "
+				"right before you can continue."
+			)
+		)
+
+	return students[0] if students else None
 
 
 def _student_groups(student, program):

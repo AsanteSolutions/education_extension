@@ -188,6 +188,7 @@ doc_events = {
 	# per doctype and cannot say "only your own", so it takes a User Permission,
 	# created here for every new student and moved if their account changes.
 	"Student": {
+		"validate": _STUDENT_PERMISSIONS + "on_student_validate",
 		"after_insert": _STUDENT_PERMISSIONS + "on_student_insert",
 		"on_update": _STUDENT_PERMISSIONS + "on_student_update",
 		"on_trash": _STUDENT_PERMISSIONS + "on_student_trash",

@@ -74,6 +74,41 @@ def release(student, user=None):
 		frappe.delete_doc("User Permission", name, ignore_permissions=True, force=True)
 
 
+def on_student_validate(doc, method=None):
+	"""One portal account, one student.
+
+	Nothing upstream enforces it: `Student.user` carries no unique constraint and
+	no index, and the education app's controller only ever sets the field. But
+	the link is read backwards to decide who a logged-in user *is* — by the
+	registration page, the grades page and the confinement in this module — and
+	two students on one account makes all three a guess.
+
+	Checked only where the link is being set or changed, so a site that already
+	holds such a pair can still edit both records while somebody sorts them out.
+	Refusing to save them would make the problem harder to fix than to keep.
+	"""
+	if not doc.user:
+		return
+
+	before = doc.get_doc_before_save()
+	if before and before.user == doc.user:
+		return
+
+	other = frappe.db.get_value(
+		"Student", {"user": doc.user, "name": ["!=", doc.name or ""]}, "name"
+	)
+	if not other:
+		return
+
+	frappe.throw(
+		frappe._(
+			"{0} is already the portal account of {1}. One account cannot stand for two "
+			"students: the registration and grades pages read it to decide whose records "
+			"to show."
+		).format(frappe.bold(doc.user), frappe.utils.get_link_to_form("Student", other))
+	)
+
+
 def on_student_insert(doc, method=None):
 	confine(doc.name, doc.user)
 

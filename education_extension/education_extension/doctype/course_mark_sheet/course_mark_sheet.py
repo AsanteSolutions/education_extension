@@ -354,8 +354,39 @@ class CourseMarkSheet(Document):
 			entry.raw_score = float(change.get("raw_score") or 0) if status == MARKED else 0
 			applied += 1
 
+		# An adjustment is worked out from the marks and approved as a pair with
+		# them, so a mark changing afterwards leaves it describing numbers that
+		# are no longer there. A sheet returned for correction keeps its
+		# moderation -- nothing on the way back to the lecturer takes it off --
+		# and without this the corrected mark went in, `effective_score` went on
+		# returning the old moderated figure, and the sheet was approved on it.
+		# The QA review showed the same stale number, so nobody could see it.
+		#
+		# Discarded rather than recalculated. Re-applying the same method to the
+		# new marks would put an adjustment nobody approved onto the sheet, which
+		# is the thing `validate_moderation_came_from_the_moderation_step` exists
+		# to prevent. The raw marks stand and QA moderates again, in the step
+		# where that is recorded.
+		withdrawn = applied and self.moderation_method in (MODERATION_LINEAR, MODERATION_FLAT)
+		if withdrawn:
+			method, value = self.moderation_method, self.moderation_value
+			self.discard_moderation()
+			# Only here, so the guard still covers an ordinary mark save. It has
+			# to be set for this one: the moderated scores are changing, and
+			# outside this branch that is exactly what it refuses.
+			self.flags.moderating = True
+
 		self.entered_by = frappe.session.user
 		self.save()
+
+		if withdrawn:
+			self.add_comment(
+				"Info",
+				_(
+					"The {0} moderation of {1} was taken off: the marks it was worked "
+					"out from have been corrected. Moderate again before approving."
+				).format(method, value),
+			)
 		# `ignored` is reported rather than swallowed: a cell the sheet does not
 		# recognise is far more likely a bug than a hostile browser, and saying
 		# nothing is how a save that saved nothing looks like it worked.
@@ -363,6 +394,9 @@ class CourseMarkSheet(Document):
 			"applied": applied,
 			"ignored": ignored,
 			"outstanding": self.outstanding_count(),
+			# So the grid can say so. A moderation disappearing with no word is
+			# how QA ends up approving a sheet they think is still adjusted.
+			"moderation_withdrawn": bool(withdrawn),
 		}
 
 	# Once the marks are in, the sheet stops being a grid to fill and becomes a
@@ -762,6 +796,17 @@ class CourseMarkSheet(Document):
 		if self.workflow_state not in (CHECKED, MODERATED):
 			frappe.throw(_("Moderation can only be cleared before approval."))
 
+		self.discard_moderation()
+		self.flags.moderating = True
+		self.save()
+
+	def discard_moderation(self):
+		"""Take the adjustment off the sheet, leaving every raw score alone.
+
+		Does not save. The two callers save for their own reasons and one of them
+		is in the middle of writing marks, so saving here would be a second write
+		and a second round of validation.
+		"""
 		for entry in self.entries:
 			entry.moderated_score = 0
 		self.moderation_method = MODERATION_NONE
@@ -769,8 +814,6 @@ class CourseMarkSheet(Document):
 		self.moderation_reason = None
 		self.moderated_by = None
 		self.moderated_on = None
-		self.flags.moderating = True
-		self.save()
 
 	def moderation_summary(self):
 		moderated = [e for e in self.entries if e.status == MARKED]

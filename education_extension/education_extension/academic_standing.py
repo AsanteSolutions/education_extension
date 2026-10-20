@@ -177,7 +177,13 @@ def assess(attempts, rule, starts=None):
 
 	failed = sorted(course for course, outcome in best.items() if outcome == FAILED)
 	attempted = len(best)
-	rate = round(100.0 * len(failed) / attempted, 1) if attempted else 0.0
+	# Kept exact. It is rounded for the figure reported below, and the threshold
+	# is compared against this one: rounding first excluded a student who was
+	# under the line. Three modules failed of seven is 42.857%, shown as 42.9%,
+	# so any threshold between the two turned a student the rule let through into
+	# one it barred — and the message then told them they had failed "42.9%",
+	# which is the rounded figure agreeing with itself rather than the arithmetic.
+	rate = 100.0 * len(failed) / attempted if attempted else 0.0
 
 	standing = {
 		"window": window,
@@ -185,7 +191,9 @@ def assess(attempts, rule, starts=None):
 		"passed": len([outcome for outcome in best.values() if outcome == PASSED]),
 		"pending": len([outcome for outcome in best.values() if outcome == PENDING]),
 		"failed": len(failed),
-		"rate": rate,
+		# The figure people are shown. A percentage to six decimals is not a
+		# thing anybody wants to read on a report or in a refusal.
+		"rate": round(rate, 1),
 		"failed_modules": _codes(failed),
 		"excluded": False,
 		"reason": None,
@@ -195,6 +203,7 @@ def assess(attempts, rule, starts=None):
 		return standing
 
 	by_count = bool(rule.most) and len(failed) >= rule.most
+	# Against the exact rate, not the rounded one. See where it is worked out.
 	by_rate = bool(rule.rate) and attempted and rate >= rule.rate
 	standing["excluded"] = bool(by_count or by_rate)
 	if standing["excluded"]:

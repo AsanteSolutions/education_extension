@@ -89,6 +89,43 @@ class TestTheRule(UnitTestCase):
 		self.assertTrue(assessed["excluded"])
 		self.assertFalse(standing.assess(taken, rule(rate=50.1))["excluded"])
 
+	def test_the_threshold_is_compared_against_the_exact_rate(self):
+		"""Three failed of seven is 42.857%, which is shown as 42.9%.
+
+		Comparing the shown figure excluded a student who was under the line, and
+		the refusal then quoted that same rounded figure back at them — the
+		rounding agreeing with itself rather than with the arithmetic. Any
+		threshold in the gap between the two is the case.
+		"""
+		taken = attempts(
+			("F", 1, YEAR), ("F", 2, YEAR), ("F", 3, YEAR),
+			("P", 4, YEAR), ("P", 5, YEAR), ("P", 6, YEAR), ("P", 7, YEAR),
+		)
+
+		assessed = standing.assess(taken, rule(rate=42.88))
+		self.assertFalse(assessed["excluded"], "excluded on a rate it is below")
+
+		# And the other side of the gap still bars them.
+		self.assertTrue(standing.assess(taken, rule(rate=42.85))["excluded"])
+
+	def test_the_figure_people_are_shown_is_still_rounded(self):
+		"""Exactness is for the comparison. Nobody wants to read a percentage to
+		six decimal places on a report or in a refusal."""
+		taken = attempts(
+			("F", 1, YEAR), ("F", 2, YEAR), ("F", 3, YEAR),
+			("P", 4, YEAR), ("P", 5, YEAR), ("P", 6, YEAR), ("P", 7, YEAR),
+		)
+		assessed = standing.assess(taken, rule(rate=40))
+
+		self.assertEqual(assessed["rate"], 42.9)
+		self.assertIn("42.9%", assessed["reason"])
+
+	def test_a_rate_exactly_on_the_threshold_still_bars(self):
+		"""The comparison is inclusive, and moving to the exact rate must not
+		quietly have changed that."""
+		taken = attempts(("F", 1, YEAR), ("F", 2, YEAR), ("P", 3, YEAR), ("P", 4, YEAR))
+		self.assertTrue(standing.assess(taken, rule(rate=50))["excluded"])
+
 	def test_either_threshold_is_enough_on_its_own(self):
 		taken = attempts(("F", 1, YEAR), ("P", 2, YEAR), ("P", 3, YEAR), ("P", 4, YEAR))
 

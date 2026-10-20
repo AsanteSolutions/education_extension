@@ -843,15 +843,22 @@ def _modules_with_nothing_recorded(student, academic_year, academic_term, by_cou
 	marks part-way through a term is marking in progress and not news; a module
 	with no marks when the results are out is the one a student will ask about.
 
-	Named rather than explained. Why a module has no marks is not knowable from
-	here -- still being marked, never sat, dropped after registering -- so the
-	page says what is true and leaves the reason to whoever the student asks.
-	Asserting a cause is what the line this replaced was doing wrong.
+	Each carries whatever the academic office has recorded about it, where they
+	have recorded anything. The reason is not knowable from here -- still being
+	marked, never sat, dropped after registering are the same absence in the data
+	-- so it is read from a Course Results Notice rather than guessed, and the
+	module is named on its own where there is none.
 	"""
+	from education_extension.education_extension.doctype.course_results_notice.course_results_notice import (
+		notices_for,
+	)
 	from education_extension.education_extension.registration import registered_courses
 
 	registered = registered_courses(student, academic_year, academic_term)
-	return sorted(course for course in registered if course not in by_course)
+	courses = sorted(course for course in registered if course not in by_course)
+	notices = notices_for(academic_term, courses)
+
+	return [{"course": course, "reason": notices.get(course)} for course in courses]
 
 
 def _nothing_to_show(released, message):

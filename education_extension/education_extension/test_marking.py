@@ -461,8 +461,76 @@ class TestTheGradesPageNamesModulesWithNoResults(IntegrationTestCase):
 			get_assessment_results(self.case["student"], self.case["academic_term"]),
 		)
 
+	def named(self):
+		return [row["course"] for row in self.without_results()]
+
 	def test_a_registered_module_with_no_marks_is_named(self):
-		self.assertIn(self.case["course"], self.without_results())
+		self.assertIn(self.case["course"], self.named())
+
+	def test_a_module_with_no_notice_carries_no_reason(self):
+		"""The page never invents one. The same absence in the data could be
+		marking in progress, a paper never sat, or a module dropped."""
+		row = next(r for r in self.without_results() if r["course"] == self.case["course"])
+		self.assertIsNone(row["reason"])
+
+	def test_what_the_academic_office_recorded_is_what_the_student_reads(self):
+		"""The reason the hard-coded line carried, with somewhere to live."""
+		needs_doctype(self, "Course Results Notice")
+		frappe.get_doc(
+			{
+				"doctype": "Course Results Notice",
+				"course": self.case["course"],
+				"academic_term": self.case["academic_term"],
+				"reason": "Marking is still in progress.",
+			}
+		).insert()
+
+		row = next(r for r in self.without_results() if r["course"] == self.case["course"])
+		self.assertEqual(row["reason"], "Marking is still in progress.")
+
+	def test_a_disabled_notice_is_not_shown(self):
+		needs_doctype(self, "Course Results Notice")
+		frappe.get_doc(
+			{
+				"doctype": "Course Results Notice",
+				"course": self.case["course"],
+				"academic_term": self.case["academic_term"],
+				"reason": "Retired, but kept on file.",
+				"disabled": 1,
+			}
+		).insert()
+
+		row = next(r for r in self.without_results() if r["course"] == self.case["course"])
+		self.assertIsNone(row["reason"])
+
+	def test_a_notice_stops_being_shown_once_the_marks_are_in(self):
+		"""The expiry, which is structural rather than a date: a notice is only
+		reached for a module the student has nothing recorded in, so forgetting
+		to delete one costs nothing."""
+		needs_doctype(self, "Course Results Notice")
+		frappe.get_doc(
+			{
+				"doctype": "Course Results Notice",
+				"course": self.case["course"],
+				"academic_term": self.case["academic_term"],
+				"reason": "Marking is still in progress.",
+			}
+		).insert()
+
+		# Stand in for the marks landing: the module leaves the list, and the
+		# notice goes with it rather than being read against a mark.
+		from education_extension.education_extension.marking import (
+			_modules_with_nothing_recorded,
+		)
+
+		as_if_marked = {self.case["course"]: [{"assessment_group": "Test 1"}]}
+		named = _modules_with_nothing_recorded(
+			self.case["student"],
+			self.case["academic_year"],
+			self.case["academic_term"],
+			as_if_marked,
+		)
+		self.assertNotIn(self.case["course"], [row["course"] for row in named])
 
 	def test_a_module_the_student_has_marks_in_is_not_named(self):
 		"""Or the notice would name most of the student's timetable."""
@@ -475,7 +543,7 @@ class TestTheGradesPageNamesModulesWithNoResults(IntegrationTestCase):
 			},
 			pluck="course",
 		)
-		named = self.without_results()
+		named = self.named()
 		for course in set(marked):
 			self.assertNotIn(course, named, course)
 
@@ -486,7 +554,7 @@ class TestTheGradesPageNamesModulesWithNoResults(IntegrationTestCase):
 		registered = registered_courses(
 			self.case["student"], self.case["academic_year"], self.case["academic_term"]
 		)
-		for course in self.without_results():
+		for course in self.named():
 			self.assertIn(course, registered, course)
 
 	def test_the_payload_carries_it_for_the_page_to_render(self):
@@ -505,7 +573,7 @@ class TestTheGradesPageNamesModulesWithNoResults(IntegrationTestCase):
 		if payload.get("message"):
 			self.skipTest("that term is not released for this student")
 		self.assertIn("without_results", payload)
-		self.assertIn(self.case["course"], payload["without_results"])
+		self.assertIn(self.case["course"], [r["course"] for r in payload["without_results"]])
 
 
 def a_student_missing_a_module():

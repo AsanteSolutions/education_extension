@@ -13,10 +13,12 @@ sibling, in the same place as the other suites:
 
 import json
 import unittest
+from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from education_extension.education_extension import marking
 from education_extension.education_extension.doctype.student_progress_report import (
 	student_progress_report as report,
 )
@@ -148,6 +150,125 @@ class TestTheFilenameComesFromTheRecord(IntegrationTestCase):
 			self.assertEqual(report._filename_for(name), name)
 
 
+class TestTheSupplementaryColumnAgreesWithThePortal(IntegrationTestCase):
+	"""The printed report and the portal read the same re-sit, so they have to
+	report the same mark for it.
+
+	They did not. This read Assessment Result on its own, so a supplementary
+	marked on an approved Course Mark Sheet was invisible and the PDF printed no
+	supplementary row at all — and it treated the score as though it were already
+	a percentage, so one marked out of anything but 100 printed as the raw score.
+	"""
+
+	COURSE = "ANH9999 - Test Course"
+
+	def setUp(self):
+		needs_doctype(self, "Student Progress Report")
+		self.doc = frappe._dict(
+			{"student": "S1", "academic_year": "2026", "academic_term": "2026 (Term)"}
+		)
+
+	def results(self, *rows):
+		"""What `get_assessment_results` hands back, which is already resolved:
+		an approved sheet answers for its sitting and Assessment Result for the
+		rest, so patching here is patching the only thing this reads."""
+		return {self.COURSE: list(rows)}
+
+	def supplementary(self, score, maximum=100, sitting="Supplementary", group="Supplementary Exam"):
+		return {
+			"assessment_group": group,
+			"sitting": sitting,
+			"total_score": score,
+			"maximum_score": maximum,
+		}
+
+	def marks_for(self, by_course):
+		with patch.object(marking, "get_assessment_results", return_value=by_course):
+			return report.get_supplementary_results(self.doc)
+
+	def test_a_mark_out_of_fifty_is_reported_as_a_percentage(self):
+		"""45 out of 50 is 90%, and printed 45 before this."""
+		self.assertEqual(
+			self.marks_for(self.results(self.supplementary(45, maximum=50))),
+			{self.COURSE: "90"},
+		)
+
+	def test_a_mark_out_of_a_hundred_is_unchanged(self):
+		"""The case every site has today, which must not move."""
+		self.assertEqual(
+			self.marks_for(self.results(self.supplementary(57))), {self.COURSE: "57"}
+		)
+
+	def test_a_supplementary_held_on_an_approved_sheet_is_reported(self):
+		"""The reader resolves a sheet ahead of Assessment Result, so going
+		through it is what makes a sheet-marked re-sit visible. Reading the
+		doctype directly, as this did, printed nothing at all."""
+		marks = self.marks_for(
+			self.results(
+				{"assessment_group": "Theory Exam", "sitting": "Main",
+				 "total_score": 48, "maximum_score": 100},
+				self.supplementary(31, maximum=50),
+			)
+		)
+		self.assertEqual(marks, {self.COURSE: "62"})
+
+	def test_the_old_naming_still_counts(self):
+		"""A supplementary entered on the standard form carries no sitting; the
+		assessment group's name is what says what it is."""
+		self.assertEqual(
+			self.marks_for(self.results(self.supplementary(70, sitting=None))),
+			{self.COURSE: "70"},
+		)
+
+	def test_a_course_with_no_supplementary_is_not_listed(self):
+		marks = self.marks_for(
+			self.results(
+				{"assessment_group": "Theory Exam", "sitting": "Main",
+				 "total_score": 64, "maximum_score": 100}
+			)
+		)
+		self.assertEqual(marks, {})
+
+	def test_an_unmarked_supplementary_is_not_a_mark_of_nought(self):
+		self.assertEqual(self.marks_for(self.results(self.supplementary(None))), {})
+
+	def test_it_puts_the_report_on_the_supplementary_issue_date(self):
+		"""The knock-on. `_issue_date_kinds` reads this, so a supplementary it
+		could not see also took the report out to the wrong issue date."""
+		by_course = self.results(self.supplementary(31, maximum=50))
+		with patch.object(marking, "get_assessment_results", return_value=by_course):
+			with patch.object(report, "get_supplementary_remarks", return_value={}):
+				with patch.object(report, "_has_aegrotat_result", return_value=False):
+					with patch.object(report, "_has_remarked_result", return_value=False):
+						kinds = report._issue_date_kinds(self.doc)
+
+		self.assertIn(report.ISSUE_DATE_SUPPLEMENTARY, kinds)
+
+	def test_the_printed_report_and_the_portal_report_the_same_mark(self):
+		"""Against whatever this site actually holds, so the two cannot drift
+		apart on real data without this failing."""
+		needs_education_app(self)
+		students = frappe.db.sql(
+			"""select distinct student, academic_term from `tabAssessment Result`
+			   where docstatus = 1 and custom_sitting = 'Supplementary' limit 10""",
+			as_dict=True,
+		)
+		if not students:
+			self.skipTest("no student on this site has a supplementary mark")
+
+		for row in students:
+			doc = frappe._dict(row)
+			printed = report.get_supplementary_results(doc)
+			portal = marking._supplementary_marks(
+				marking.get_assessment_results(doc.student, doc.academic_term)
+			)
+			self.assertEqual(
+				printed,
+				{course: mark.rstrip("%") for course, mark in portal.items()},
+				row.student,
+			)
+
+
 def an_account_without_staff_roles():
 	"""A real enabled account holding none of the roles the doctype allows.
 
@@ -170,6 +291,10 @@ def run_tests(verbosity=2):
 	"""Run these from a console, since bench run-tests cannot bootstrap this site."""
 	suite = unittest.TestSuite()
 	loader = unittest.TestLoader()
-	for case in (TestOnlyStaffMayPrintAReport, TestTheFilenameComesFromTheRecord):
+	for case in (
+		TestOnlyStaffMayPrintAReport,
+		TestTheFilenameComesFromTheRecord,
+		TestTheSupplementaryColumnAgreesWithThePortal,
+	):
 		suite.addTests(loader.loadTestsFromTestCase(case))
 	return unittest.TextTestRunner(verbosity=verbosity).run(suite)

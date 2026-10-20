@@ -313,12 +313,20 @@ def get_results(doc):
 
 	results = frappe.get_all(
 		"Assessment Result",
-		fields=["course", "assessment_group", "total_score"],
+		# The sitting is read by `_assessment_field`, so leaving it out here
+		# blinded the only caller — `compare_with_legacy` — to the distinction
+		# between a paper and the aegrotat that stood in for it. It would then
+		# report a disagreement with the scheme calculation that was an artefact
+		# of the comparison rather than of either calculation, on the tool whose
+		# whole job is deciding whether the two agree.
+		fields=["course", "assessment_group", "custom_sitting as sitting", "total_score"],
 		filters={
 			"student": doc.student,
 			"academic_term": doc.academic_term,
 			# Supplementary Exam is surfaced separately; keep it out of the DP /
-			# final-mark computation (same as the portal Grades page).
+			# final-mark computation (same as the portal Grades page). One carried
+			# on the sitting field rather than in the group's name slips past this
+			# filter, and `_assessment_field` drops it instead.
 			"assessment_group": ["!=", SUPP_GROUP],
 			"docstatus": 1,
 		},
@@ -519,25 +527,56 @@ def _last_marks_change(doc):
 def round_half_up(value):
     return str(int(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)))
 
-def _assessment_field(assessment_group, group_to_field):
-	"""The score field an assessment group's mark belongs to, as (field, is_aegrotat).
+def _assessment_field(result, group_to_field):
+	"""The score field a mark belongs to, as (field, is_aegrotat).
 
-	An aegrotat sitting is the normal exam group prefixed with AEGRO (e.g. "AEGRO
-	Theory Exam") and stands in for the sitting it replaces, so it resolves to the
-	same field as the group it prefixes. (None, False) for a group that is not part
-	of the final mark, such as the supplementary exam."""
-	group = (assessment_group or "").strip()
+	(None, False) for a mark that takes no part in the final mark, such as the
+	supplementary exam.
+
+	The sitting comes from `marking.sitting_of`, which is what every other reader
+	uses. A sitting is carried on the mark in `custom_sitting`; only where that
+	says Main does the assessment group's name decide, because an aegrotat paper
+	entered on the standard Assessment Result form is named "AEGRO Theory Exam"
+	and has no sitting set — nothing on that form prompts for one.
+
+	Reading only the name, as this did, meant an aegrotat whose sitting field
+	said so but whose group was the plain "Theory Exam" could not be told apart
+	from the paper it stood in for: both landed on the same field, and with no
+	ordering on the query behind them, whichever arrived last won. A student
+	excused an exam could have the mark they were excused from count instead.
+
+	Imported inside the function because `marking` reads this module's fallback
+	calculation; the same reason `preview_progress_report` imports it where it
+	does. It resolves through `sys.modules` after the first call, which is what
+	makes that affordable in a loop.
+	"""
+	from education_extension.education_extension.marking import (
+		AEGROTAT,
+		SUPPLEMENTARY,
+		sitting_of,
+	)
+
+	group, sitting = sitting_of(result)
+	if sitting == SUPPLEMENTARY:
+		# Reported in a column of its own and never folded into the final mark,
+		# the same rule `resolve_results` applies on the scheme path.
+		return None, False
 
 	field = group_to_field.get(group)
-	if field:
-		return field, False
+	if not field:
+		# Matched without regard to case, so a group recorded as "theory exam"
+		# still counts towards "Theory Exam" rather than going missing — which is
+		# what `calculate_course_mark` does on the other path.
+		folded = group.casefold()
+		field = next(
+			(value for name, value in group_to_field.items() if name.casefold() == folded),
+			None,
+		)
 
-	if group.upper().startswith(AEGROTAT_GROUP_PREFIX):
-		for name, aegrotat_field in group_to_field.items():
-			if group.upper().endswith(name.upper()):
-				return aegrotat_field, True
+	if not field:
+		return None, False
 
-	return None, False
+	return field, sitting == AEGROTAT
 
 
 def calculate_final_results(results):
@@ -594,7 +633,7 @@ def calculate_final_results_detailed(results):
         scores = {field: None for field in group_to_field.values()}
         aegrotat_fields = set()
         for sr in course_results:
-            field, is_aegrotat = _assessment_field(sr["assessment_group"], group_to_field)
+            field, is_aegrotat = _assessment_field(sr, group_to_field)
             if not field or sr["total_score"] is None:
                 continue
             # An aegrotat sitting replaces the one it stands in for, so it keeps the

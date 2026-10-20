@@ -121,7 +121,13 @@ def calculate_course_mark(criteria, results):
 	by_name = {group.casefold(): group for group in resolved}
 	matched = set()
 
-	coursework_weightage = sum(_weightage(row) for row in criteria if _component(row) == COURSEWORK)
+	# The weight this student is actually being marked out of, which is not the
+	# scheme's total where a row was offered and not taken. See below.
+	coursework_weightage = 0.0
+	total_weightage = 0.0
+	# Whether anything was taken out of play, which is the only case the final
+	# mark has to be rescaled for. See below.
+	taken_out_of_play = False
 	coursework_earned = 0.0
 	examination_earned = 0.0
 	missing = []
@@ -135,16 +141,36 @@ def calculate_course_mark(criteria, results):
 			matched.add(key)
 		result = resolved.get(key) if key else None
 		ratio = score_ratio(result) if result else None
+		weightage = _weightage(row)
+		is_coursework = _component(row) == COURSEWORK
 
 		if ratio is None:
 			if result is not None:
 				unmarked.append(group)
-			if _field(row, "is_required", default=1):
-				missing.append(group)
+
+			if not _field(row, "is_required", default=1):
+				# Offered and not taken, so it was never part of what this student
+				# was marked out of. Leaving its weight in the denominator was how
+				# an optional assessment quietly cost a student the marks it was
+				# worth: nothing went in `missing`, so the mark was published as
+				# complete, and a student with full marks on everything they did
+				# sit still came out short by exactly that weighting.
+				taken_out_of_play = True
+				continue
+
+			# Required and not marked. The weight stays, because it is still owed
+			# -- the mark is incomplete rather than out of less, and the flags
+			# below are what say so.
+			missing.append(group)
+			total_weightage += weightage
+			if is_coursework:
+				coursework_weightage += weightage
 			continue
 
-		contribution = ratio * _weightage(row)
-		if _component(row) == COURSEWORK:
+		total_weightage += weightage
+		contribution = ratio * weightage
+		if is_coursework:
+			coursework_weightage += weightage
 			coursework_earned += contribution
 		else:
 			examination_earned += contribution
@@ -163,9 +189,21 @@ def calculate_course_mark(criteria, results):
 	]
 	missing_examination = [group for group in missing if group not in missing_coursework]
 
+	# Out of the weight actually in play, but only where that is not the whole
+	# scheme. A scheme is validated to total 100, so dividing by it and
+	# multiplying back would be the same number in arithmetic and is not the same
+	# number in floating point: `57.5 / 100.0 * 100` is 57.499999999999993, which
+	# rounds to 57 where 57.5 rounds to 58. Two students' marks moved by one on
+	# this site before the guard went in, and a comparison that rounded to six
+	# decimals before checking did not notice.
+	earned = coursework_earned + examination_earned
+	final_mark = (
+		earned / total_weightage * 100 if (taken_out_of_play and total_weightage) else earned
+	)
+
 	return {
 		"dp": dp,
-		"final_mark": coursework_earned + examination_earned,
+		"final_mark": final_mark,
 		"dp_complete": not missing_coursework,
 		"exams_complete": not missing_examination,
 		"missing": missing,

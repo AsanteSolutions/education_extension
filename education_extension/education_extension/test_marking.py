@@ -19,6 +19,7 @@ from education_extension.education_extension.marking import (
 	AEGROTAT,
 	LEGACY_EMPTY_KEYS,
 	MAIN,
+	NO_MARK,
 	SUPPLEMENTARY,
 	_course_remarks,
 	_merge_sheet_marks,
@@ -425,6 +426,128 @@ class TestEverySittingCanBeReleased(FrappeTestCase):
 		self.assertEqual(KIND_FOR_SITTING[""], KIND_FOR_SITTING[MAIN])
 
 
+class TestAnOptionalAssessmentNobodySat(FrappeTestCase):
+	"""`is_required` is documented as "must be marked before the final mark is
+	complete", so an optional row left unmarked is an expected state, not a gap.
+
+	It was costing the student its weighting. Nothing went into `missing`, so the
+	mark was published as complete — while the weight stayed in the denominator,
+	so a student with full marks on everything they did sit came out short by
+	exactly that row's share, with nothing anywhere saying why.
+	"""
+
+	COURSE = "TEST1101 - Test Course"
+
+	def scheme(self, optional_weight=10):
+		"""Two tests, an optional assignment, and a paper. Totals 100, as a
+		submitted scheme is validated to."""
+		return [
+			{"assessment_group": "Test 1", "component": COURSEWORK, "weightage": 20,
+			 "subminimum": None, "is_required": 1},
+			{"assessment_group": "Test 2", "component": COURSEWORK, "weightage": 20,
+			 "subminimum": None, "is_required": 1},
+			{"assessment_group": "Assignment 1", "component": COURSEWORK,
+			 "weightage": optional_weight, "subminimum": None, "is_required": 0},
+			{"assessment_group": "Theory Exam", "component": EXAMINATION,
+			 "weightage": 50 - optional_weight + 10, "subminimum": None, "is_required": 1},
+		]
+
+	def results(self, **scores):
+		return [
+			{
+				"course": self.COURSE,
+				"assessment_group": group.replace("_", " ").title(),
+				"total_score": score,
+				"maximum_score": 100,
+			}
+			for group, score in scores.items()
+		]
+
+	def test_full_marks_on_what_was_sat_is_full_marks(self):
+		"""The shape of the bug. 100 on everything taken came out as 90."""
+		computed = calculate_course_mark(
+			self.scheme(), self.results(test_1=100, test_2=100, theory_exam=100)
+		)
+
+		self.assertTrue(computed["dp_complete"] and computed["exams_complete"])
+		self.assertAlmostEqual(computed["final_mark"], 100, places=6)
+		self.assertAlmostEqual(computed["dp"], 100, places=6)
+
+	def test_the_mark_is_still_published_as_complete(self):
+		"""Which it should be — that is what optional means — and is why the
+		deflated mark went out rather than showing a dash."""
+		computed = calculate_course_mark(
+			self.scheme(), self.results(test_1=60, test_2=60, theory_exam=60)
+		)
+
+		self.assertEqual(computed["missing"], [])
+		self.assertTrue(computed["dp_complete"] and computed["exams_complete"])
+		self.assertAlmostEqual(computed["final_mark"], 60, places=6)
+
+	def test_an_optional_assessment_that_was_sat_counts_normally(self):
+		"""Optional is about whether it is owed, not about whether it counts."""
+		computed = calculate_course_mark(
+			self.scheme(), self.results(test_1=100, test_2=100, assignment_1=0, theory_exam=100)
+		)
+
+		# The 10 points it is worth are back in play, and scored nothing.
+		self.assertAlmostEqual(computed["final_mark"], 90, places=6)
+
+	def test_a_required_assessment_left_unmarked_still_reads_as_incomplete(self):
+		"""The other half: a gap must not be rescaled away into a full mark."""
+		computed = calculate_course_mark(
+			self.scheme(), self.results(test_1=100, test_2=100, assignment_1=100)
+		)
+
+		self.assertEqual(computed["missing"], ["Theory Exam"])
+		self.assertFalse(computed["exams_complete"])
+		self.assertEqual(format_mark(computed["final_mark"], False), NO_MARK)
+
+	def test_a_scheme_with_nothing_optional_is_unchanged(self):
+		"""Every scheme on every site today, so this must not move."""
+		for course in ARCHETYPES:
+			criteria = scheme_for(course)
+			scores = {row["assessment_group"]: 63 for row in criteria}
+			with self.subTest(course=course):
+				self.assertEqual(
+					mark(criteria, results_for(course, scores)),
+					calculate_final_results(results_for(course, scores))[course],
+				)
+
+	def test_a_mark_on_the_rounding_boundary_does_not_move(self):
+		"""The near-miss in this change, pinned.
+
+		Rescaling by a total that is already 100 is the same number in arithmetic
+		and a different one in floating point: `57.5 / 100.0 * 100` is
+		57.499999999999993, which rounds to 57 where 57.5 rounds to 58. Done
+		unconditionally it moved two real students' marks by one, and a check that
+		rounded to six decimals before comparing reported nothing.
+		"""
+		criteria = [
+			{"assessment_group": "Test 1", "component": COURSEWORK, "weightage": 50,
+			 "subminimum": None, "is_required": 1},
+			{"assessment_group": "Theory Exam", "component": EXAMINATION, "weightage": 50,
+			 "subminimum": None, "is_required": 1},
+		]
+		computed = calculate_course_mark(criteria, self.results(test_1=60, theory_exam=55))
+
+		self.assertEqual(computed["final_mark"], 57.5)
+		self.assertEqual(format_mark(computed["final_mark"], True), "58")
+
+	def test_a_student_who_sat_nothing_optional_is_not_divided_by_nothing(self):
+		"""Every coursework row optional and none of them sat."""
+		criteria = [
+			{"assessment_group": "Assignment 1", "component": COURSEWORK, "weightage": 50,
+			 "subminimum": None, "is_required": 0},
+			{"assessment_group": "Theory Exam", "component": EXAMINATION, "weightage": 50,
+			 "subminimum": None, "is_required": 1},
+		]
+		computed = calculate_course_mark(criteria, self.results(theory_exam=70))
+
+		self.assertEqual(computed["dp"], 0.0)
+		self.assertAlmostEqual(computed["final_mark"], 70, places=6)
+
+
 class TestTheLegacyPathReadsTheSittingToo(FrappeTestCase):
 	"""The fallback for a course with no scheme, which is the one serving the
 	changeover.
@@ -665,6 +788,7 @@ def run_tests(verbosity=2):
 		TestSheetsAndSittings,
 		TestLegacyFallbackShape,
 		TestEverySittingCanBeReleased,
+		TestAnOptionalAssessmentNobodySat,
 		TestTheLegacyPathReadsTheSittingToo,
 		TestFilingAndWithdrawingAComment,
 	):

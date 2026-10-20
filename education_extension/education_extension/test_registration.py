@@ -1165,6 +1165,128 @@ class TestCarryOversStayOptional(UnitTestCase):
 		self.assertFalse(row["selectable"])
 
 
+class TestAStudentIsNeverLockedOut(UnitTestCase):
+	"""A module in the student's own block is not optional, so if it cannot be
+	submitted the student cannot register at all.
+
+	That is what happened. A co-requisite was taken to be satisfied by anything
+	on offer and not already passed, including modules the student turned out to
+	be blocked from. The module then rendered as required and selectable, the
+	co-requisite could not be added because it was not selectable, the module
+	could not be dropped because it was mandatory, and the submit refused every
+	combination. Three students on this site are in exactly that position:
+	ANH1205 needs ANH1204 alongside, and ANH1204 needs a pass in ANH1101.
+	"""
+
+	BLOCK = 2
+
+	def rows(self, candidates, history, rules, strict=False):
+		"""The page itself, for a hand-written curriculum.
+
+		Through `offered_rows`, which is what `options_for` calls — rebuilding it
+		here instead would test the rebuild. It did, at first: these passed with
+		the wiring taken back out of `options_for`.
+		"""
+		candidates = {course: self.BLOCK for course in candidates}
+		return {
+			row["course"]: row
+			for row in reg.offered_rows(candidates, self.BLOCK, history, set(), rules, strict)
+		}
+
+	def assert_submittable(self, rows, history, rules):
+		"""The property that has to hold: there is a set the student can send.
+
+		Everything selectable is ticked, which is what the page starts with, and
+		the two checks the submit path applies must both pass on it.
+		"""
+		chosen = [course for course, row in rows.items() if row["selectable"]]
+
+		mandatory = [c for c, row in rows.items() if row["status"] in reg.MANDATORY]
+		self.assertEqual(
+			[c for c in mandatory if c not in chosen],
+			[],
+			"a module that cannot be dropped and cannot be chosen",
+		)
+		self.assertEqual(
+			reg.unmet_corequisites(chosen, set(chosen), history, rules),
+			[],
+			"the chosen set would be refused for an unmet co-requisite",
+		)
+
+	def test_a_module_whose_corequisite_is_blocked_cannot_be_offered(self):
+		"""The bug, in the shape the curriculum actually has it."""
+		rules = {"M": [("N", reg.COREQUISITE)], "N": [("P", reg.PREREQUISITE)]}
+		history = {"P": reg.FAILED}
+
+		rows = self.rows(["M", "N"], history, rules)
+
+		self.assertEqual(rows["N"]["status"], reg.BLOCKED, "its prerequisite failed")
+		self.assertEqual(rows["M"]["status"], reg.BLOCKED, "it needs a module nobody can take")
+		self.assert_submittable(rows, history, rules)
+
+	def test_the_consequence_carries_as_far_as_it_goes(self):
+		"""Dropping one module can block a second that needed it, which can block
+		a third, so it is worked out to a fixed point rather than in one pass."""
+		rules = {
+			"A": [("B", reg.COREQUISITE)],
+			"B": [("C", reg.COREQUISITE)],
+			"C": [("P", reg.PREREQUISITE)],
+		}
+		history = {"P": reg.FAILED}
+
+		rows = self.rows(["A", "B", "C"], history, rules)
+
+		for course in ("A", "B", "C"):
+			self.assertEqual(rows[course]["status"], reg.BLOCKED, course)
+		self.assert_submittable(rows, history, rules)
+
+	def test_two_modules_that_need_each_other_are_still_offered(self):
+		"""The ordinary case, and the one a fixed point could get wrong: each
+		satisfies the other, and neither is blocked by anything."""
+		rules = {"M": [("N", reg.COREQUISITE)], "N": [("M", reg.COREQUISITE)]}
+		history = {}
+
+		rows = self.rows(["M", "N"], history, rules)
+
+		self.assertEqual(rows["M"]["status"], reg.REQUIRED)
+		self.assertEqual(rows["N"]["status"], reg.REQUIRED)
+		self.assert_submittable(rows, history, rules)
+
+	def test_a_corequisite_not_on_offer_at_all_blocks_it(self):
+		"""Not merely unverified. For a co-requisite the question is whether the
+		student is taking it, and a module absent from the term is a definite no
+		— so the setting about missing results has nothing to say here."""
+		rules = {"M": [("ELSEWHERE", reg.COREQUISITE)]}
+
+		for strict in (False, True):
+			with self.subTest(strict=strict):
+				rows = self.rows(["M"], {}, rules, strict)
+				self.assertEqual(rows["M"]["status"], reg.BLOCKED)
+				self.assert_submittable(rows, {}, rules)
+
+	def test_a_passed_corequisite_still_satisfies_it(self):
+		"""Nothing above should have made a co-requisite harder to meet."""
+		rules = {"M": [("N", reg.COREQUISITE)]}
+		history = {"N": reg.PASSED}
+
+		rows = self.rows(["M"], history, rules)
+		self.assertEqual(rows["M"]["status"], reg.REQUIRED)
+
+	def test_nothing_is_blocked_when_nothing_is_wrong(self):
+		rules = {"M": [("N", reg.COREQUISITE)], "N": []}
+		rows = self.rows(["M", "N"], {}, rules)
+
+		self.assertEqual(rows["M"]["status"], reg.REQUIRED)
+		self.assertEqual(rows["N"]["status"], reg.REQUIRED)
+
+	def test_takeable_together_leaves_out_what_is_already_passed(self):
+		"""It answers "what could be taken alongside", and a module already
+		passed is not being taken — it satisfies a co-requisite on its own."""
+		self.assertEqual(
+			reg.takeable_together({"M": 2, "N": 2}, {"N": reg.PASSED}, {}), {"M"}
+		)
+
+
 class TestCorequisitesAtSubmission(UnitTestCase):
 	"""Judged against what is actually being taken, not what was offered."""
 
@@ -1331,6 +1453,7 @@ def run_tests(verbosity=2):
 		TestRegistrationFlow,
 		TestRegistrationPeriod,
 		TestCarryOversStayOptional,
+		TestAStudentIsNeverLockedOut,
 		TestCorequisitesAtSubmission,
 		TestModuleRegistrationsShape,
 		TestModuleRegistrations,

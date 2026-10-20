@@ -244,6 +244,56 @@ def next_block(student, academic_term):
 	return {"block": candidate, "reason": None}
 
 
+def offered_rows(candidates, block, history, already, rules, strict=False):
+	"""Every module on offer this term, as the page shows them.
+
+	Its own function so that what the page is built from is what the tests are
+	built from. Working the same thing out a second way in a test proves the
+	second way works -- the first version of these tests rebuilt this here and
+	went on passing with the wiring ripped out of `options_for`.
+	"""
+	alongside = takeable_together(candidates, history, rules, strict)
+
+	rows = [
+		_row(course, course_block, block, history, already, rules, alongside, strict)
+		for course, course_block in candidates.items()
+	]
+	rows.sort(key=lambda row: (row["block"], row["course"]))
+	return rows
+
+
+def takeable_together(candidates, history, rules, strict=False):
+	"""Which of this term's modules the student could actually take, as a set.
+
+	A co-requisite is satisfied by taking the other module in the same term, so
+	the check needs to know what "taking it" could mean. Everything on offer and
+	not already passed was assumed to qualify — including modules the student
+	turns out to be blocked from.
+
+	That locked students out of registering altogether. A module in their own
+	block is not optional, so it cannot be dropped; a blocked module is not
+	selectable, so it cannot be added; and the module needed the blocked one
+	alongside it. Every combination the student could tick was refused, with the
+	page showing nothing wrong. Three students on this site are in that position
+	through ANH1205, which needs ANH1204, which needs a pass in ANH1101.
+
+	Worked out to a fixed point rather than in one pass: dropping a module the
+	student cannot take can block a second module that needed it, which can block
+	a third. The set only ever shrinks, so it settles.
+	"""
+	alongside = {course for course in candidates if history.get(course, NEVER) != PASSED}
+
+	while True:
+		blocked = {
+			course
+			for course in alongside
+			if unmet_prerequisites(course, history, alongside, rules, strict)[0]
+		}
+		if not blocked:
+			return alongside
+		alongside -= blocked
+
+
 def unmet_prerequisites(course, history, alongside, rules, strict=False):
 	"""(blocking, outstanding, unverified) for one module.
 
@@ -273,12 +323,14 @@ def unmet_prerequisites(course, history, alongside, rules, strict=False):
 
 		if kind == COREQUISITE:
 			# Being taken alongside satisfies it; so does having passed it.
+			# Anything else is unmet, and unmet for a co-requisite is a fact
+			# rather than a gap in the record -- the question is whether the
+			# student is taking it, not whether they passed it, so `strict` has
+			# nothing to say about it. Treating "never taken and not on offer" as
+			# merely unverified left the module selectable and unsubmittable.
 			if outcome == PASSED or other in alongside:
 				continue
-			if outcome == NEVER:
-				unmet(other)
-			else:
-				blocking.append(other)
+			blocking.append(other)
 			continue
 
 		if outcome == PASSED:
@@ -380,15 +432,7 @@ def options_for(student, on=None):
 			if history.get(course, NEVER) in behind:
 				candidates.setdefault(course, earlier)
 
-	# A co-requisite is satisfied by a module taken in the same term, and the
-	# candidate set is now exactly that, so it is judged against all of it.
-	alongside = {c for c in candidates if history.get(c, NEVER) != PASSED}
-
-	rows = [
-		_row(course, course_block, block, history, already, rules, alongside, strict)
-		for course, course_block in candidates.items()
-	]
-	rows.sort(key=lambda row: (row["block"], row["course"]))
+	rows = offered_rows(candidates, block, history, already, rules, strict)
 
 	# Stripped rather than never computed, so the rule stays in one place and only
 	# what leaves the server changes. The field stays present and empty: the page

@@ -312,9 +312,43 @@ def per_day(filters=None):
 		if row["registered_on"]
 	)
 
-	opens, closes = getdate(period.opens_on), getdate(period.last_date_to_register)
-	today = getdate(nowdate())
-	last = min(closes, today) if today >= opens else closes
+	labels, values = _plot(
+		counted,
+		getdate(period.opens_on),
+		getdate(period.last_date_to_register),
+		getdate(nowdate()),
+	)
+	if not labels:
+		return empty(_("Registrations"))
+
+	return {"labels": labels, "datasets": [{"name": _("Registrations"), "values": values}]}
+
+
+def _plot(counted, opens, closes, today):
+	"""(labels, values) for the window, with everything outside it bucketed.
+
+	Pure, so the one thing that has to hold here can be checked without a period
+	or an enrolment: every registration counted lands somewhere. The chart is
+	read beside a card giving the same total, and one that quietly dropped a row
+	would read as the card being wrong.
+
+	The window is plotted up to today rather than to its close, so a window still
+	open does not trail off into a fortnight of days that have not happened yet.
+	That is what left a gap. `enrollment_date` is a plain Date field staff can
+	set, and a registration dated ahead of today is inside the window — so
+	neither the "before" bucket nor the "after" one caught it, and there was no
+	day for it either. It vanished, and the chart totalled less than the card.
+
+	So the plot runs to today or to the last day anything actually happened on,
+	whichever is later, and never past the close.
+	"""
+	inside = [day for day in counted if opens <= day <= closes]
+	if today < opens:
+		# Nothing has happened yet and nothing can have: show the window whole,
+		# so it can be seen coming.
+		last = closes
+	else:
+		last = min(closes, max([today, *inside]))
 
 	labels, values = [], []
 
@@ -334,7 +368,4 @@ def per_day(filters=None):
 		labels.append(_("After {0}").format(frappe.utils.formatdate(closes, "d MMM")))
 		values.append(after)
 
-	if not labels:
-		return empty(_("Registrations"))
-
-	return {"labels": labels, "datasets": [{"name": _("Registrations"), "values": values}]}
+	return labels, values

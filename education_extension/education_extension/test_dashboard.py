@@ -17,9 +17,12 @@ dashboard and the list underneath it can never tell different stories.
 """
 
 import unittest
+from collections import Counter
 
 import frappe
 from frappe.tests import IntegrationTestCase
+from frappe.tests.utils import FrappeTestCase
+from frappe.utils import getdate
 
 from education_extension.education_extension import dashboard
 from education_extension.education_extension.report.registration_status.registration_status import (
@@ -375,10 +378,87 @@ class TestDashboardPermissions(IntegrationTestCase):
 			frappe.set_user("Administrator")
 
 
+class TestEveryRegistrationLandsSomewhereOnTheChart(FrappeTestCase):
+	"""The chart sits beside a card giving the same total, so a row it drops
+	reads as the card being wrong.
+
+	The window is plotted up to today rather than to its close, so a window still
+	open does not trail off into days that have not happened. That left a gap:
+	`enrollment_date` is a plain Date field staff can set, and a registration
+	dated ahead of today is *inside* the window, so neither bucket caught it and
+	there was no day for it either.
+	"""
+
+	OPENS = getdate("2026-09-01")
+	CLOSES = getdate("2026-09-30")
+
+	def plot(self, days, today):
+		counted = Counter({getdate(day): count for day, count in days.items()})
+		labels, values = dashboard._plot(counted, self.OPENS, self.CLOSES, getdate(today))
+		self.assertEqual(len(labels), len(values), "a label with no value, or the reverse")
+		return counted, labels, values
+
+	def assert_nothing_dropped(self, days, today):
+		counted, _labels, values = self.plot(days, today)
+		self.assertEqual(
+			sum(values), sum(counted.values()), "the chart totals less than it was given"
+		)
+
+	def test_a_registration_dated_ahead_of_today_is_not_dropped(self):
+		"""The bug. Inside the window, after today: in no bucket and on no day."""
+		self.assert_nothing_dropped(
+			{"2026-09-05": 3, "2026-09-18": 2}, today="2026-09-10"
+		)
+
+	def test_it_is_plotted_on_its_own_day_not_swept_into_a_bucket(self):
+		"""A bucket labelled "After 30 Sep" would be a lie about a day inside the
+		window, so the plot reaches it instead."""
+		_counted, labels, values = self.plot({"2026-09-18": 2}, today="2026-09-10")
+
+		self.assertEqual(labels[-1], "18 Sep")
+		self.assertEqual(values[-1], 2)
+
+	def test_an_open_window_still_stops_at_today(self):
+		"""Which is the reason for the limit: a window with three weeks left must
+		not trail off into three weeks of empty days."""
+		_counted, labels, _values = self.plot({"2026-09-05": 1}, today="2026-09-10")
+		self.assertEqual(labels[-1], "10 Sep")
+
+	def test_what_falls_outside_the_window_is_still_bucketed(self):
+		days = {"2026-08-20": 69, "2026-09-05": 1, "2026-10-02": 4}
+		_counted, labels, values = self.plot(days, today="2026-10-20")
+
+		self.assert_nothing_dropped(days, today="2026-10-20")
+		self.assertIn("Before 1 Sep", labels)
+		self.assertIn("After 30 Sep", labels)
+		self.assertEqual(values[labels.index("Before 1 Sep")], 69)
+		self.assertEqual(values[labels.index("After 30 Sep")], 4)
+
+	def test_nothing_is_dropped_whenever_the_chart_is_read(self):
+		"""Before the window opens, during it, and long after."""
+		days = {"2026-08-20": 2, "2026-09-05": 3, "2026-09-25": 4, "2026-10-05": 5}
+		for today in ("2026-08-01", "2026-09-01", "2026-09-10", "2026-09-30", "2026-12-01"):
+			with self.subTest(today=today):
+				self.assert_nothing_dropped(days, today=today)
+
+	def test_a_window_that_has_not_opened_is_shown_whole(self):
+		"""So it can be seen coming, rather than as an empty chart."""
+		_counted, labels, _values = self.plot({}, today="2026-08-01")
+		self.assertEqual((labels[0], labels[-1]), ("1 Sep", "30 Sep"))
+
+	def test_a_quiet_day_inside_the_window_is_still_plotted(self):
+		"""Dropping them would compress the quiet fortnight in the middle and
+		hide the shape, which is the whole point of the chart."""
+		_counted, labels, values = self.plot({"2026-09-01": 1}, today="2026-09-05")
+		self.assertEqual(labels, ["1 Sep", "2 Sep", "3 Sep", "4 Sep", "5 Sep"])
+		self.assertEqual(values, [1, 0, 0, 0, 0])
+
+
 def run_tests(verbosity=2):
 	"""Run these from a console, since bench run-tests cannot bootstrap this site."""
 	suite = unittest.TestSuite()
 	loader = unittest.TestLoader()
-	for case in (TestDashboardWiring, TestDashboardNumbers, TestDashboardPermissions):
+	for case in (
+		TestEveryRegistrationLandsSomewhereOnTheChart,TestDashboardWiring, TestDashboardNumbers, TestDashboardPermissions):
 		suite.addTests(loader.loadTestsFromTestCase(case))
 	return unittest.TextTestRunner(verbosity=verbosity).run(suite)

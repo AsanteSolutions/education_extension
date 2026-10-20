@@ -427,6 +427,112 @@ class TestEverySittingCanBeReleased(FrappeTestCase):
 		self.assertEqual(KIND_FOR_SITTING[""], KIND_FOR_SITTING[MAIN])
 
 
+class TestTheGradesPageNamesModulesWithNoResults(IntegrationTestCase):
+	"""The table is built from the marks, so a module with none has no row in it.
+
+	A student looking for a result they were expecting found nothing and nothing
+	saying why. The portal papered over that with a line of text naming one
+	module, hard-coded into the page, shown to every student on every term and
+	true only until somebody remembered to take it out.
+	"""
+
+	def setUp(self):
+		needs_education_app(self)
+		needs_doctype(self, "Program Enrollment", "Assessment Result")
+
+		self.case = a_student_missing_a_module()
+		if not self.case:
+			self.skipTest("every registered module on this site has marks")
+
+	def tearDown(self):
+		frappe.set_user("Administrator")
+		frappe.db.rollback()
+
+	def without_results(self):
+		from education_extension.education_extension.marking import (
+			_modules_with_nothing_recorded,
+			get_assessment_results,
+		)
+
+		return _modules_with_nothing_recorded(
+			self.case["student"],
+			self.case["academic_year"],
+			self.case["academic_term"],
+			get_assessment_results(self.case["student"], self.case["academic_term"]),
+		)
+
+	def test_a_registered_module_with_no_marks_is_named(self):
+		self.assertIn(self.case["course"], self.without_results())
+
+	def test_a_module_the_student_has_marks_in_is_not_named(self):
+		"""Or the notice would name most of the student's timetable."""
+		marked = frappe.get_all(
+			"Assessment Result",
+			filters={
+				"student": self.case["student"],
+				"academic_term": self.case["academic_term"],
+				"docstatus": 1,
+			},
+			pluck="course",
+		)
+		named = self.without_results()
+		for course in set(marked):
+			self.assertNotIn(course, named, course)
+
+	def test_it_names_nothing_a_student_is_not_registered_for(self):
+		"""It answers for this student's own timetable, not the curriculum."""
+		from education_extension.education_extension.registration import registered_courses
+
+		registered = registered_courses(
+			self.case["student"], self.case["academic_year"], self.case["academic_term"]
+		)
+		for course in self.without_results():
+			self.assertIn(course, registered, course)
+
+	def test_the_payload_carries_it_for_the_page_to_render(self):
+		"""The page reads `without_results`; a server that stops sending it would
+		silently take the notice away."""
+		from education_extension.education_extension.marking import get_student_grades
+
+		user = frappe.db.get_value("Student", self.case["student"], "user")
+		if not user:
+			self.skipTest("that student has no portal account")
+
+		frappe.set_user(user)
+		payload = get_student_grades(self.case["academic_year"], self.case["academic_term"])
+		frappe.set_user("Administrator")
+
+		if payload.get("message"):
+			self.skipTest("that term is not released for this student")
+		self.assertIn("without_results", payload)
+		self.assertIn(self.case["course"], payload["without_results"])
+
+
+def a_student_missing_a_module():
+	"""A student registered for a module with no marks on record, or None.
+
+	Found rather than made: the state needs a submitted enrolment and an absence
+	of results, and manufacturing the absence means manufacturing everything
+	around it.
+	"""
+	row = frappe.db.sql(
+		"""
+		select pe.student, pe.academic_year, pe.academic_term, pec.course
+		from `tabProgram Enrollment` pe
+		join `tabProgram Enrollment Course` pec on pec.parent = pe.name
+		where pe.docstatus = 1
+		  and not exists (
+			select 1 from `tabAssessment Result` ar
+			where ar.docstatus = 1 and ar.student = pe.student
+			  and ar.course = pec.course and ar.academic_term = pe.academic_term
+		  )
+		limit 1
+		""",
+		as_dict=True,
+	)
+	return row[0] if row else None
+
+
 class TestAMarkWithNoMaximumRecorded(FrappeTestCase):
 	"""`maximum_score` is an optional Float, so a mark captured without one holds
 	a 0 — and a mark out of nought is not a mark anybody can be awarded.
@@ -866,6 +972,7 @@ def run_tests(verbosity=2):
 		TestSheetsAndSittings,
 		TestLegacyFallbackShape,
 		TestEverySittingCanBeReleased,
+		TestTheGradesPageNamesModulesWithNoResults,
 		TestAMarkWithNoMaximumRecorded,
 		TestAnOptionalAssessmentNobodySat,
 		TestTheLegacyPathReadsTheSittingToo,

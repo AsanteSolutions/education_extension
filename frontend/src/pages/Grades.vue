@@ -1,13 +1,22 @@
 <template>
 	<div>
-		<!--Banner to remove-->
+		<!-- Named by the server, for this student and this term, and gone of its
+		     own accord once the marks land. What stood here was a line of text
+		     naming one module, shown to everybody on every term.
+
+		     It says what is true and not why: a module with no marks may be
+		     unmarked, or never sat, or dropped after registering, and the page
+		     cannot tell which. -->
 		<div
+			v-if="withoutResults.length"
 			class="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-800"
 		>
 			<FeatherIcon name="info" class="h-4 w-4 shrink-0" />
-			<span>For those taking Occupational Communication I results are still pending.</span>
+			<span>
+				No results have been recorded for {{ withoutResults.join(', ') }}. Ask the
+				academic office if you were expecting one.
+			</span>
 		</div>
-		<!--Banner to remove-->
 		<div class="px-5 py-4">
 			<Dropdown class="mb-4" :options="allTerms">
 				<template #default="{ open }">
@@ -130,6 +139,13 @@ const loadTerm = (academic_year, academic_term) => {
 }
 
 const tableRows = computed(() => grades.data?.rows || [])
+
+// Modules this student is registered for that have no marks at all. Shown only
+// alongside a table, because that is the state the server works it out for:
+// before a term is released there is no table and nothing is late.
+const withoutResults = computed(() =>
+	view.value.state === 'table' ? grades.data?.without_results || [] : [],
+)
 
 const tableColumns = computed(() => {
 	const columns = [

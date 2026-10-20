@@ -821,9 +821,37 @@ def get_student_grades(academic_year, academic_term):
 		# The supplementary columns only appear when the student has something in
 		# them, which most do not.
 		"has_supplementary": bool(supplementary or supplementary_comments),
+		"without_results": _modules_with_nothing_recorded(
+			student, academic_year, academic_term, by_course
+		),
 		"released": True,
 		"message": None,
 	}
+
+
+def _modules_with_nothing_recorded(student, academic_year, academic_term, by_course):
+	"""Modules the student registered for that have no marks at all.
+
+	The table is built from the marks, so a module with none has no row in it:
+	a student looking for a result they were expecting finds nothing, and
+	nothing saying why. The portal used to paper over that with a line of text
+	naming one module, hard-coded into the page, shown to every student on every
+	term and true only until somebody remembered to take it out.
+
+	Only reached once the term has been released -- before that there is no
+	table at all -- which is what makes this worth saying. A module with no
+	marks part-way through a term is marking in progress and not news; a module
+	with no marks when the results are out is the one a student will ask about.
+
+	Named rather than explained. Why a module has no marks is not knowable from
+	here -- still being marked, never sat, dropped after registering -- so the
+	page says what is true and leaves the reason to whoever the student asks.
+	Asserting a cause is what the line this replaced was doing wrong.
+	"""
+	from education_extension.education_extension.registration import registered_courses
+
+	registered = registered_courses(student, academic_year, academic_term)
+	return sorted(course for course in registered if course not in by_course)
 
 
 def _nothing_to_show(released, message):

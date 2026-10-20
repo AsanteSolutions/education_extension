@@ -29,6 +29,7 @@ from education_extension.education_extension.marking import (
 	legacy_course_marks,
 	remark_codes,
 	resolve_results,
+	score_ratio,
 	set_course_remark,
 	sitting_of,
 )
@@ -426,6 +427,83 @@ class TestEverySittingCanBeReleased(FrappeTestCase):
 		self.assertEqual(KIND_FOR_SITTING[""], KIND_FOR_SITTING[MAIN])
 
 
+class TestAMarkWithNoMaximumRecorded(FrappeTestCase):
+	"""`maximum_score` is an optional Float, so a mark captured without one holds
+	a 0 — and a mark out of nought is not a mark anybody can be awarded.
+
+	It was being read as no mark at all. `calculate_course_mark` counted the
+	assessment as missing, so submitting a scheme for the course turned a mark
+	the legacy calculation had been showing all along into a dash that nothing
+	could clear, with nothing on the row saying the maximum was what was absent.
+	"""
+
+	COURSE = "TEST1101 - Test Course"
+
+	def result(self, score, maximum, group="Test 1"):
+		row = {"course": self.COURSE, "assessment_group": group, "total_score": score}
+		if maximum is not None:
+			row["maximum_score"] = maximum
+		return row
+
+	def test_a_score_with_no_maximum_is_read_out_of_a_hundred(self):
+		for maximum in (0, None):
+			with self.subTest(maximum=maximum):
+				self.assertEqual(score_ratio(self.result(65, maximum)), 0.65)
+
+	def test_a_real_maximum_is_still_honoured(self):
+		"""The reason `score_ratio` exists; it must not become a no-op."""
+		self.assertEqual(score_ratio(self.result(45, 50)), 0.9)
+
+	def test_no_score_is_still_no_mark(self):
+		"""Unmarked means no score. That is the case the None was for."""
+		self.assertIsNone(score_ratio(self.result(None, 100)))
+		self.assertIsNone(score_ratio(self.result(None, 0)))
+
+	def test_a_zero_is_a_mark_not_an_absence(self):
+		self.assertEqual(score_ratio(self.result(0, 100)), 0.0)
+		self.assertEqual(score_ratio(self.result(0, 0)), 0.0)
+
+	def test_the_course_is_not_dashed_for_want_of_a_maximum(self):
+		"""The shape of the bug: a complete set of marks reading as incomplete."""
+		criteria = [
+			{"assessment_group": "Test 1", "component": COURSEWORK, "weightage": 50,
+			 "subminimum": None, "is_required": 1},
+			{"assessment_group": "Theory Exam", "component": EXAMINATION, "weightage": 50,
+			 "subminimum": None, "is_required": 1},
+		]
+		results = [self.result(60, 0), self.result(70, 0, group="Theory Exam")]
+
+		computed = calculate_course_mark(criteria, results)
+		self.assertEqual(computed["missing"], [])
+		self.assertEqual(computed["unmarked"], [])
+		self.assertTrue(computed["dp_complete"] and computed["exams_complete"])
+		self.assertEqual(mark(criteria, results), "65")
+
+	def test_converting_the_course_to_a_scheme_does_not_change_the_mark(self):
+		"""The invariant that matters. The legacy calculation reads every score as
+		a percentage, so a course with no maxima recorded had a mark all along —
+		submitting a scheme must not take it away."""
+		course = "ANH1201 - Anatomy"
+		criteria = scheme_for(course)
+		results = [
+			{"course": course, "assessment_group": row["assessment_group"],
+			 "total_score": 63, "maximum_score": 0}
+			for row in criteria
+		]
+
+		self.assertEqual(mark(criteria, results), calculate_final_results(results)[course])
+		self.assertNotEqual(mark(criteria, results), NO_MARK)
+
+	def test_a_supplementary_with_no_maximum_is_still_reported(self):
+		"""It was dropping out of the supplementary column for the same reason."""
+		self.assertEqual(
+			_supplementary_marks(
+				{self.COURSE: [self.result(58, 0, group="Supplementary Exam")]}
+			),
+			{self.COURSE: "58%"},
+		)
+
+
 class TestAnOptionalAssessmentNobodySat(FrappeTestCase):
 	"""`is_required` is documented as "must be marked before the final mark is
 	complete", so an optional row left unmarked is an expected state, not a gap.
@@ -788,6 +866,7 @@ def run_tests(verbosity=2):
 		TestSheetsAndSittings,
 		TestLegacyFallbackShape,
 		TestEverySittingCanBeReleased,
+		TestAMarkWithNoMaximumRecorded,
 		TestAnOptionalAssessmentNobodySat,
 		TestTheLegacyPathReadsTheSittingToo,
 		TestFilingAndWithdrawingAComment,

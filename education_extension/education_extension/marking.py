@@ -95,13 +95,30 @@ def resolve_results(results):
 	return {group: kept["result"] for group, kept in resolved.items()}
 
 
+# What a mark is out of when nothing says. `maximum_score` is an optional Float,
+# so a mark captured without one holds a 0 rather than a blank — and a mark out
+# of nought is not a mark anybody can be awarded. Reading it as a percentage is
+# what the legacy calculation did with every mark, and what the rest of this app
+# already does: `course_mark_sheet` and `mark_change` both say `or 100`.
+ASSUMED_MAXIMUM = 100
+
+
 def score_ratio(result):
-	"""A result's score as a fraction of its maximum, or None when unmarked."""
+	"""A result's score as a fraction of its maximum, or None when unmarked.
+
+	Unmarked means no score. A score with no maximum recorded against it is still
+	a mark, and is read out of 100 rather than thrown away.
+
+	Returning None for one made `calculate_course_mark` count the assessment as
+	missing, so submitting a scheme for the course turned a mark the legacy
+	calculation had been showing all along into a dash — permanently, since
+	nothing about the student or the marking could clear it, and nothing on the
+	row said it was the maximum that was absent rather than the mark.
+	"""
 	score = result.get("total_score")
-	maximum = result.get("maximum_score")
-	if score is None or not maximum:
+	if score is None:
 		return None
-	return float(score) / float(maximum)
+	return float(score) / float(result.get("maximum_score") or ASSUMED_MAXIMUM)
 
 
 def calculate_course_mark(criteria, results):

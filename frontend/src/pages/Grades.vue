@@ -4,18 +4,24 @@
 		     own accord once the marks land. What stood here was a line of text
 		     naming one module, shown to everybody on every term.
 
-		     It says what is true and not why: a module with no marks may be
-		     unmarked, or never sat, or dropped after registering, and the page
-		     cannot tell which. -->
+		     The reason comes with it where the academic office has recorded one,
+		     on a Course Results Notice. The page never invents one: the same
+		     absence in the data could be marking in progress, a paper never sat,
+		     or a module dropped after registering. -->
 		<div
 			v-if="withoutResults.length"
-			class="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-800"
+			class="flex items-start gap-2 border-b border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-800"
 		>
-			<FeatherIcon name="info" class="h-4 w-4 shrink-0" />
-			<span>
-				No results have been recorded for {{ withoutResults.join(', ') }}. Ask the
-				academic office if you were expecting one.
-			</span>
+			<FeatherIcon name="info" class="mt-0.5 h-4 w-4 shrink-0" />
+			<div>
+				<div class="font-medium">No results have been recorded for:</div>
+				<div v-for="row in withoutResults" :key="row.course" class="mt-0.5">
+					{{ row.course }}<template v-if="row.reason"> — {{ row.reason }}</template>
+				</div>
+				<div v-if="anyWithoutAReason" class="mt-1 text-amber-700">
+					Ask the academic office if you were expecting one.
+				</div>
+			</div>
 		</div>
 		<div class="px-5 py-4">
 			<Dropdown class="mb-4" :options="allTerms">
@@ -146,6 +152,11 @@ const tableRows = computed(() => grades.data?.rows || [])
 const withoutResults = computed(() =>
 	view.value.state === 'table' ? grades.data?.without_results || [] : [],
 )
+
+// The pointer to the office is for the ones nobody has explained. Showing it
+// under a notice that already gives the reason reads as though the reason were
+// not the answer.
+const anyWithoutAReason = computed(() => withoutResults.value.some((row) => !row.reason))
 
 const tableColumns = computed(() => {
 	const columns = [

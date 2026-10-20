@@ -179,9 +179,20 @@
    "icon": "award",
    "is_query_report": 0,
    "label": "Results and Remarks",
-   "link_count": 5,
+   "link_count": 6,
    "onboard": 0,
    "type": "Card Break"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Course Results Notice",
+   "link_count": 0,
+   "link_to": "Course Results Notice",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
   },
   {
    "dependencies": "",
@@ -239,7 +250,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-09-28 09:00:00.000000",
+ "modified": "2026-10-20 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "Education Extension",
  "name": "Education Extension",

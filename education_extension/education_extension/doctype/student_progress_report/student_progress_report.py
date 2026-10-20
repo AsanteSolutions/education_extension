@@ -327,20 +327,42 @@ def get_results(doc):
 
 
 def get_supplementary_results(doc):
-	"""Supplementary exam mark per course, mirroring the portal Grades page: the
-	"Supplementary Exam" assessment group's score (treated as a percentage, like
-	the other marks here). Keyed by course; usually empty as few students supplement."""
-	rows = frappe.get_all(
-		"Assessment Result",
-		fields=["course", "total_score"],
-		filters={
-			"student": doc.student,
-			"academic_term": doc.academic_term,
-			"assessment_group": SUPP_GROUP,
-			"docstatus": 1,
-		},
+	"""Supplementary exam mark per course, as a percentage. Keyed by course.
+
+	Read through `marking`, which is where the rest of this report's marks come
+	from, so the printed document and the portal cannot disagree about the same
+	re-sit. Two ways they did:
+
+	A supplementary marked on an approved Course Mark Sheet was invisible here.
+	This looked only at Assessment Result, so the PDF printed no supplementary
+	row at all for a re-sit the Course Results report and the portal both showed
+	a mark for — and `_issue_date_kinds` reads the same empty result, so the
+	report also came out on the Standard issue date instead of the Supplementary
+	one. `marking._supplementary_marks` was fixed for exactly this; this copy
+	was left behind.
+
+	And the score was printed as though it were already a percentage. A
+	supplementary marked 45 out of 50 printed as 45% while the portal showed 90%,
+	because `score_ratio` is what turns a mark into a percentage and this did not
+	use it.
+
+	Imported inside the function because `marking` reads this module's fallback
+	calculation, the same reason `preview_progress_report` imports it where it
+	does.
+	"""
+	from education_extension.education_extension.marking import (
+		NO_MARK,
+		_supplementary_for,
+		get_assessment_results,
 	)
-	return {r.course: round_half_up(r.total_score) for r in rows if r.total_score is not None}
+
+	marks = {}
+	for course, results in get_assessment_results(doc.student, doc.academic_term).items():
+		mark = _supplementary_for(results)
+		if mark != NO_MARK:
+			marks[course] = mark
+
+	return marks
 
 
 def get_academic_remarks(doc):

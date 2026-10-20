@@ -425,6 +425,106 @@ class TestEverySittingCanBeReleased(FrappeTestCase):
 		self.assertEqual(KIND_FOR_SITTING[""], KIND_FOR_SITTING[MAIN])
 
 
+class TestTheLegacyPathReadsTheSittingToo(FrappeTestCase):
+	"""The fallback for a course with no scheme, which is the one serving the
+	changeover.
+
+	It decided what an aegrotat was from the assessment group's name alone — the
+	retired "AEGRO Theory Exam" convention — and never read the sitting the mark
+	actually carries. So a mark whose sitting said Aegrotat but whose group was
+	the plain "Theory Exam" was indistinguishable from the paper it stood in for:
+	both landed on one field and, with no ordering on the query behind them,
+	whichever arrived last won.
+	"""
+
+	COURSE = "ANH1201 - Anatomy"
+
+	def result(self, group, score, sitting=None):
+		row = {
+			"course": self.COURSE,
+			"assessment_group": group,
+			"total_score": score,
+			"maximum_score": 100,
+		}
+		if sitting:
+			row["sitting"] = sitting
+		return row
+
+	def everything_but_theory(self, score=60):
+		return [
+			self.result(row["assessment_group"], score)
+			for row in scheme_for(self.COURSE)
+			if row["assessment_group"] != "Theory Exam"
+		]
+
+	def mark_for(self, theory_papers):
+		return calculate_final_results(self.everything_but_theory() + theory_papers)[self.COURSE]
+
+	def test_an_aegrotat_on_the_sitting_field_displaces_the_main_paper(self):
+		"""The main theory paper scores 0 and the aegrotat 60, so a mark of 60 can
+		only come from the aegrotat having replaced it — in either order, because
+		nothing orders the rows."""
+		papers = [
+			self.result("Theory Exam", 0),
+			self.result("Theory Exam", 60, sitting="Aegrotat"),
+		]
+		self.assertEqual(self.mark_for(papers), "60")
+		self.assertEqual(self.mark_for(list(reversed(papers))), "60")
+
+	def test_an_aegrotat_on_the_sitting_field_is_enough_on_its_own(self):
+		self.assertEqual(
+			self.mark_for([self.result("Theory Exam", 60, sitting="Aegrotat")]), "60"
+		)
+
+	def test_the_retired_naming_still_works(self):
+		"""A mark entered on the standard form is not prompted for a sitting, so
+		an AEGRO-named group has to go on meaning what it always meant."""
+		papers = [
+			self.result("Theory Exam", 0),
+			self.result("AEGRO Theory Exam", 60),
+		]
+		self.assertEqual(self.mark_for(papers), "60")
+		self.assertEqual(self.mark_for(list(reversed(papers))), "60")
+
+	def test_a_supplementary_on_the_sitting_field_is_not_folded_in(self):
+		"""It is reported in a column of its own. Carried on the sitting rather
+		than in the group's name, it used to land on the theory field and count
+		towards the final mark."""
+		papers = [
+			self.result("Theory Exam", 60),
+			self.result("Theory Exam", 99, sitting="Supplementary"),
+		]
+		self.assertEqual(self.mark_for(papers), "60")
+		self.assertEqual(self.mark_for(list(reversed(papers))), "60")
+
+	def test_a_group_recorded_in_another_case_still_counts(self):
+		"""Casing of an assessment group must not quietly cost a student a mark,
+		which is what the scheme path already guarantees."""
+		self.assertEqual(self.mark_for([self.result("theory exam", 60)]), "60")
+
+	def test_it_agrees_with_the_scheme_calculation_on_the_same_aegrotat(self):
+		"""The invariant the whole fallback exists to hold: a course converting to
+		a scheme must not change what the student scored.
+
+		Both orderings, because nothing orders the rows and the old reading
+		happened to agree in one of them — it took the last mark to land on the
+		field, which is the aegrotat only if the aegrotat came second.
+		"""
+		papers = [
+			self.result("Theory Exam", 0),
+			self.result("Theory Exam", 60, sitting="Aegrotat"),
+		]
+		criteria = scheme_for(self.COURSE)
+
+		for order in (papers, list(reversed(papers))):
+			results = self.everything_but_theory() + order
+			with self.subTest(aegrotat_first=order[0].get("sitting") == "Aegrotat"):
+				self.assertEqual(
+					calculate_final_results(results)[self.COURSE],
+					mark(criteria, results),
+				)
+
+
 class TestFilingAndWithdrawingAComment(IntegrationTestCase):
 	"""`set_course_remark` over the whole life of one comment.
 
@@ -565,6 +665,7 @@ def run_tests(verbosity=2):
 		TestSheetsAndSittings,
 		TestLegacyFallbackShape,
 		TestEverySittingCanBeReleased,
+		TestTheLegacyPathReadsTheSittingToo,
 		TestFilingAndWithdrawingAComment,
 	):
 		suite.addTests(loader.loadTestsFromTestCase(case))

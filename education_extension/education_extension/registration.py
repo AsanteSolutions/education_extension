@@ -17,6 +17,9 @@ import frappe
 from frappe import _
 from frappe.utils import escape_html, formatdate, getdate, now, nowdate
 
+from education_extension.education_extension.doctype.registration_consent.registration_consent import (
+	consent_for,
+)
 from education_extension.education_extension.doctype.registration_period.registration_period import (
 	next_period,
 	open_periods,
@@ -872,9 +875,14 @@ def _record_consent(student, period, agreed, signatures):
 	guardian_name = (signatures.get("guardian_name") or "").strip()
 	guardian_signature = (signatures.get("guardian") or "").strip()
 
+	superseded = _retire_stale_consent(student, period)
+
 	consent = frappe.new_doc("Registration Consent")
 	consent.update(
 		{
+			# Set when this registration replaces one that was undone, so the
+			# chain of what was signed stays walkable from either end.
+			"amended_from": superseded,
 			"student": student,
 			"academic_year": period["academic_year"],
 			"academic_term": period["academic_term"],
@@ -899,6 +907,33 @@ def _record_consent(student, period, agreed, signatures):
 	consent.insert()
 	consent.submit()
 	return consent.name
+
+
+def _retire_stale_consent(student, period):
+	"""Cancel a consent left over from a registration that no longer stands.
+
+	Nobody reaches this point with a registration in force -- `register_student`
+	refuses outright when the term already has one -- so a consent still standing
+	here belongs to a registration that has since been cancelled or removed. Left
+	alone it would give the term two submitted consents disagreeing about what was
+	signed, and the registrar's countersignature on the old one would go on
+	standing over a module list that was never put in front of them.
+
+	Cancelled rather than deleted: what the student agreed to in September is
+	still what they agreed to in September, and the new consent points back at it.
+	"""
+	stale = consent_for(student, period["academic_year"], period["academic_term"])
+	if not stale:
+		return None
+
+	doc = frappe.get_doc("Registration Consent", stale)
+	doc.flags.ignore_permissions = True
+	doc.cancel()
+	doc.add_comment(
+		"Comment",
+		_("Superseded: the registration this consent was given for is no longer in force."),
+	)
+	return doc.name
 
 
 def _create_enrollment(student, program, courses, rows, period):

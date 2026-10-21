@@ -24,6 +24,10 @@ from frappe.tests import IntegrationTestCase, UnitTestCase
 from frappe.utils import add_days, nowdate
 
 from education_extension.education_extension import registration as reg
+from education_extension.education_extension.testing import (
+	needs_doctype,
+	needs_education_app,
+)
 from education_extension.patches import seed_course_prerequisites as seed
 
 PROGRAM = "Diploma in Animal Health Semester {0}"
@@ -1443,6 +1447,113 @@ class TestModuleRegistrations(IntegrationTestCase):
 		self.assertEqual(students, order_students(students))
 
 
+class TestNobodyIsMissingFromTheChaseList(IntegrationTestCase):
+	"""The report exists to find the people who have not registered, so a student
+	it cannot show is the one failure it cannot afford.
+
+	Its population came from enrolment history, which a student registering for
+	the first time has none of. An intake in its first term was therefore
+	invisible on it — and a registrar opening the list saw only the years above
+	and concluded everybody had registered.
+	"""
+
+	def setUp(self):
+		needs_education_app(self)
+		needs_doctype(self, "Student", "Program Enrollment", "Academic Term")
+
+		from education_extension.education_extension.report.registration_status import (
+			registration_status as report,
+		)
+
+		self.report = report
+		self.terms = frappe.get_all("Academic Term", pluck="name")
+		if not self.terms:
+			self.skipTest("this site has no academic terms")
+
+	def tearDown(self):
+		frappe.db.rollback()
+
+	def population(self, term):
+		return {
+			student.name
+			for student in self.report.chaseable(
+				self.report.furthest_block_before(term), self.report.registrations_for(term)
+			)
+		}
+
+	def a_student_with_no_enrolment(self):
+		enrolled = set(
+			frappe.get_all("Program Enrollment", filters={"docstatus": 1}, pluck="student")
+		)
+		for student in frappe.get_all("Student", filters={"enabled": 1}, pluck="name"):
+			if student not in enrolled:
+				return student
+		return None
+
+	def test_a_student_who_has_never_been_enrolled_is_still_shown(self):
+		student = self.a_student_with_no_enrolment()
+		if not student:
+			self.skipTest("every student on this site has an enrolment")
+
+		for term in self.terms:
+			with self.subTest(term=term):
+				self.assertIn(student, self.population(term))
+
+	def test_they_are_chased_in_the_term_their_first_block_runs_in(self):
+		"""Which is the whole point: not merely present, but counted among the
+		people who still need to register."""
+		student = self.a_student_with_no_enrolment()
+		if not student:
+			self.skipTest("every student on this site has an enrolment")
+
+		statuses = set()
+		for term in self.terms:
+			rows = self.report.rows(frappe._dict({"academic_term": term}))
+			row = next((r for r in rows if r["student"] == student), None)
+			self.assertIsNotNone(row, term)
+			statuses.add(row["status"])
+
+		self.assertIn(
+			self.report.NOT_REGISTERED,
+			statuses,
+			"never chased in any term, so still effectively invisible",
+		)
+
+	def test_widening_it_drops_nobody(self):
+		"""Everyone the report showed before has to go on being shown."""
+		for term in self.terms:
+			furthest = self.report.furthest_block_before(term)
+			this_term = self.report.registrations_for(term)
+			with self.subTest(term=term):
+				self.assertLessEqual(
+					set(furthest) | set(this_term),
+					self.population(term),
+					"a student with enrolments fell off the list",
+				)
+
+	def test_a_student_who_has_left_is_not_chased(self):
+		"""Being told to chase somebody who has gone is worse than useless."""
+		student = self.a_student_with_no_enrolment()
+		if not student:
+			self.skipTest("every student on this site has an enrolment")
+
+		frappe.db.set_value("Student", student, "enabled", 0, update_modified=False)
+		self.assertNotIn(student, self.population(self.terms[0]))
+
+	def test_a_student_who_has_left_but_registered_is_still_shown(self):
+		"""That is a fact about the term, and belongs on a report about it."""
+		term = next(
+			(t for t in self.terms if self.report.registrations_for(t)), None
+		)
+		if not term:
+			self.skipTest("no term on this site has a registration")
+
+		student = next(iter(self.report.registrations_for(term)))
+		frappe.db.set_value("Student", student, "enabled", 0, update_modified=False)
+
+		self.assertIn(student, self.population(term))
+
+
 def run_tests(verbosity=2):
 	"""Run these from a console, since bench run-tests cannot bootstrap this site."""
 	suite = unittest.TestSuite()
@@ -1457,6 +1568,7 @@ def run_tests(verbosity=2):
 		TestCorequisitesAtSubmission,
 		TestModuleRegistrationsShape,
 		TestModuleRegistrations,
+		TestNobodyIsMissingFromTheChaseList,
 	):
 		suite.addTests(loader.loadTestsFromTestCase(case))
 	return unittest.TextTestRunner(verbosity=verbosity).run(suite)

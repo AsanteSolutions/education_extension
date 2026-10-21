@@ -77,6 +77,13 @@ class RegistrationOverride(Document):
 		shows two. Recomputed on every save while the document is a draft, so what
 		is stored is what the person submitting it was looking at.
 		"""
+		# A standing is read for a term, and there is nothing to read one against
+		# until the field is filled. Leaving it to the mandatory check on the field
+		# keeps the complaint about the empty term, rather than about a standing
+		# nobody asked for.
+		if not self.academic_term:
+			return
+
 		assessed = standing(self.student, self.academic_term)
 		self.modules_failed = assessed["failed"]
 		self.modules_attempted = assessed["attempted"]

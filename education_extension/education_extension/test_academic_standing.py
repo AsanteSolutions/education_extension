@@ -341,6 +341,47 @@ class TestTheOverride(IntegrationTestCase):
 		override.insert()
 		return override
 
+	def test_a_standing_cannot_be_read_without_naming_the_term(self):
+		"""Refused rather than answered as best it can, because that answer is wrong.
+
+		A permission is granted for one term and counts for no other, so with no
+		term named there is nowhere to look for one — and a student a registrar has
+		already waved through would come back as unable to register.
+		"""
+		self.turn_the_rule_on()
+		override = self.grant()
+		override.submit()
+
+		# Named, the permission is found and the student is not stopped.
+		allowed = standing.standing(self.student, self.term)
+		self.assertTrue(allowed["excluded"], "the rule should still have fired")
+		self.assertEqual(allowed["override"], override.name)
+		self.assertFalse(allowed["blocked"], "a permitted student is not blocked")
+
+		# Unnamed, there is no honest answer to give.
+		with self.assertRaises(frappe.ValidationError):
+			standing.standing(self.student)
+		with self.assertRaises(frappe.ValidationError):
+			standing.registration_block(self.student)
+
+	def test_a_standing_reads_without_a_term_where_no_rule_is_configured(self):
+		"""With no rule there is no permission to find, so no term to name.
+
+		The registration page asks for this on every load, and most sites have no
+		rule at all; making them all carry a term for a lookup that never happens
+		would be the wrong trade.
+		"""
+		settings = frappe.get_doc("Registration Settings")
+		settings.block_on_failed_modules = 0
+		settings.save()
+		frappe.clear_cache(doctype="Registration Settings")
+
+		assessed = standing.standing(self.student)
+		self.assertFalse(assessed["excluded"], "no rule means nobody is excluded")
+		self.assertIsNone(assessed["override"])
+		self.assertFalse(assessed["blocked"])
+		self.assertIsNone(standing.registration_block(self.student))
+
 	def test_granting_records_who_allowed_it_and_when(self):
 		override = self.grant()
 		self.assertFalse(override.granted_by, "a draft has allowed nothing")

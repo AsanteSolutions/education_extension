@@ -21,7 +21,7 @@ import unittest
 
 import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
-from frappe.utils import add_days, nowdate
+from frappe.utils import add_days, getdate, nowdate
 
 from education_extension.education_extension import registration as reg
 from education_extension.education_extension.testing import (
@@ -1447,6 +1447,156 @@ class TestModuleRegistrations(IntegrationTestCase):
 		self.assertEqual(students, order_students(students))
 
 
+class TestMoreThanOneWindowOpenAtOnce(IntegrationTestCase):
+	"""Which programme a student is registering for depends on the block they
+	move into, which depends on the term — and the term is the period's.
+
+	So the period could not be settled before the programme was known, and the
+	code settled it first anyway: it took the most recently opened window and
+	checked afterwards whether that one covered the student. When it did not, the
+	page said registration was closed while the window that did cover them was
+	open and accepting.
+	"""
+
+	def setUp(self):
+		needs_education_app(self)
+		needs_doctype(self, "Registration Period", "Academic Term", "Program")
+
+		terms = frappe.get_all(
+			"Academic Term",
+			fields=["name", "academic_year"],
+			order_by="term_start_date asc",
+			limit=2,
+		)
+		if len(terms) < 2:
+			self.skipTest("this site has fewer than two academic terms")
+		self.first, self.second = terms[0], terms[1]
+
+		self.student = a_student_with_no_enrolment()
+		if not self.student:
+			self.skipTest("every student on this site has an enrolment")
+
+		self.today = getdate(nowdate())
+
+	def tearDown(self):
+		frappe.db.rollback()
+		frappe.clear_cache()
+
+	def window(self, term, opened_days_ago, programs=None):
+		"""An open window for a term, replacing any already on file for it."""
+		name = frappe.db.exists("Registration Period", {"academic_term": term.name})
+		if name:
+			frappe.delete_doc("Registration Period", name, force=True, ignore_permissions=True)
+
+		doc = frappe.get_doc(
+			{
+				"doctype": "Registration Period",
+				"academic_term": term.name,
+				"academic_year": term.academic_year,
+				"opens_on": add_days(self.today, -opened_days_ago),
+				"last_date_to_register": add_days(self.today, 14),
+				"is_open": 1,
+				"programs": [{"program": program} for program in (programs or [])],
+			}
+		)
+		doc.insert(ignore_permissions=True)
+		frappe.clear_cache()
+		return doc
+
+	def program_for_block(self, block):
+		return reg.programs_by_block().get(block)
+
+	def test_the_window_that_covers_the_student_is_the_one_used(self):
+		"""The finding's case. The newest window names programmes this student is
+		not in; the older one covers them and is open."""
+		theirs = self.program_for_block(1)
+		others = [p for b, p in reg.programs_by_block().items() if b != 1]
+		if not theirs or not others:
+			self.skipTest("this site has too few programmes to restrict one window")
+
+		# Opened most recently, so tried first, and covering somebody else.
+		self.window(self.second, opened_days_ago=1, programs=others[:1])
+		self.window(self.first, opened_days_ago=5)
+
+		options = reg.options_for(self.student)
+
+		self.assertEqual(
+			options["state"],
+			"open",
+			"told registration is closed while a window that covers them is open",
+		)
+		self.assertEqual(options["period"]["academic_term"], self.first.name)
+		self.assertEqual(options["program"], theirs)
+
+	def test_a_window_whose_term_does_not_place_the_student_is_passed_over(self):
+		"""The same fault by its other route: the newest window's term puts this
+		student in no block at all, because their next one does not run in it."""
+		self.window(self.second, opened_days_ago=1)
+		self.window(self.first, opened_days_ago=5)
+
+		options = reg.options_for(self.student)
+
+		self.assertEqual(options["state"], "open")
+		self.assertEqual(options["period"]["academic_term"], self.first.name)
+
+	def test_one_window_on_its_own_still_behaves(self):
+		"""The ordinary case, which is every site today."""
+		self.window(self.first, opened_days_ago=1)
+
+		options = reg.options_for(self.student)
+		self.assertEqual(options["state"], "open")
+		self.assertEqual(options["period"]["academic_term"], self.first.name)
+
+	def test_a_student_no_window_suits_is_still_told_why(self):
+		"""Passing over a window must not turn a refusal into silence."""
+		others = [p for b, p in reg.programs_by_block().items() if b != 1]
+		if not others:
+			self.skipTest("this site has too few programmes")
+
+		self.window(self.first, opened_days_ago=1, programs=others[:1])
+
+		options = reg.options_for(self.student)
+		self.assertIn(options["state"], ("closed", "not_offered"))
+		self.assertTrue(options.get("message"), "refused with no reason given")
+
+	def test_registering_in_one_window_is_seen_from_the_other(self):
+		"""Offering a second window because the first was not the one picked
+		would be a way to enrol twice."""
+		self.window(self.second, opened_days_ago=1)
+		self.window(self.first, opened_days_ago=5)
+
+		options = reg.options_for(self.student)
+		# Asserted rather than skipped past. This is the same pair of windows the
+		# test above checks, so anything but "open" means that fault is back —
+		# and skipping here would hide it behind a test that looks harmless.
+		self.assertEqual(options["state"], "open")
+
+		chosen = [
+			row["course"]
+			for group in options["groups"]
+			for row in group["rows"]
+			if row["selectable"]
+		]
+		reg.register_student(self.student, chosen, AGREED, SIGNED)
+
+		self.assertEqual(reg.options_for(self.student)["state"], "registered")
+
+
+def a_student_with_no_enrolment():
+	"""A student with no enrolment history, so their next block is the first one.
+
+	Found rather than made: building one means a Student, and the point is to
+	place a real record through the real rules.
+	"""
+	enrolled = set(
+		frappe.get_all("Program Enrollment", filters={"docstatus": 1}, pluck="student")
+	)
+	for student in frappe.get_all("Student", filters={"enabled": 1}, pluck="name"):
+		if student not in enrolled:
+			return student
+	return None
+
+
 class TestNobodyIsMissingFromTheChaseList(IntegrationTestCase):
 	"""The report exists to find the people who have not registered, so a student
 	it cannot show is the one failure it cannot afford.
@@ -1482,13 +1632,7 @@ class TestNobodyIsMissingFromTheChaseList(IntegrationTestCase):
 		}
 
 	def a_student_with_no_enrolment(self):
-		enrolled = set(
-			frappe.get_all("Program Enrollment", filters={"docstatus": 1}, pluck="student")
-		)
-		for student in frappe.get_all("Student", filters={"enabled": 1}, pluck="name"):
-			if student not in enrolled:
-				return student
-		return None
+		return a_student_with_no_enrolment()
 
 	def test_a_student_who_has_never_been_enrolled_is_still_shown(self):
 		student = self.a_student_with_no_enrolment()
@@ -1568,6 +1712,7 @@ def run_tests(verbosity=2):
 		TestCorequisitesAtSubmission,
 		TestModuleRegistrationsShape,
 		TestModuleRegistrations,
+		TestMoreThanOneWindowOpenAtOnce,
 		TestNobodyIsMissingFromTheChaseList,
 	):
 		suite.addTests(loader.loadTestsFromTestCase(case))

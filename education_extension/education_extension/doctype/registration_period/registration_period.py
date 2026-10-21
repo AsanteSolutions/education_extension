@@ -63,14 +63,16 @@ class RegistrationPeriod(Document):
 		return getdate(self.opens_on) <= on <= getdate(self.last_date_to_register)
 
 
-def open_period(program=None, on=None):
-	"""The period accepting registrations on `on`, for `program` if given.
+def open_periods(on=None):
+	"""Every period accepting registrations on `on`, most recently opened first.
 
-	None when registration is shut, which the portal renders as its closed state
-	rather than as an error.
+	More than one can be open at once — two terms whose windows overlap, or a
+	window restricted to some programmes running beside a general one. A caller
+	that has to decide *which* of them applies to a particular student needs to
+	see them all, because that decision can depend on the term each one names.
 	"""
 	on = getdate(on or nowdate())
-	candidates = frappe.get_all(
+	names = frappe.get_all(
 		"Registration Period",
 		filters={
 			"is_open": 1,
@@ -80,8 +82,16 @@ def open_period(program=None, on=None):
 		order_by="opens_on desc",
 		pluck="name",
 	)
-	for name in candidates:
-		period = frappe.get_cached_doc("Registration Period", name)
+	return [frappe.get_cached_doc("Registration Period", name) for name in names]
+
+
+def open_period(program=None, on=None):
+	"""The period accepting registrations on `on`, for `program` if given.
+
+	None when registration is shut, which the portal renders as its closed state
+	rather than as an error.
+	"""
+	for period in open_periods(on=on):
 		if program is None or period.covers(program):
 			return period
 	return None

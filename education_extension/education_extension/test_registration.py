@@ -18,6 +18,7 @@ also run from a console:
 
 import json
 import unittest
+from unittest import mock
 
 import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
@@ -791,6 +792,92 @@ class TestRegistrationFlow(IntegrationTestCase):
 		self.assertFalse(reg.registered_courses(self.student, "2026", self.term))
 		self.assertFalse(
 			frappe.db.exists("Registration Consent", {"student": self.student, "docstatus": 1})
+		)
+
+	def test_re_registering_after_a_cancellation_leaves_one_consent(self):
+		"""A term has one consent in force, however often it was registered for.
+
+		An enrolment can stop standing -- a registrar undoing a mistake, a student
+		withdrawing and coming back -- and the student then registers again. Both
+		consents would otherwise sit submitted against the same term, and a
+		registrar who had countersigned the first would be on record as having
+		approved a module list nobody ever put in front of them.
+		"""
+		first = reg.register_student(self.student, self.mandatory_modules(), AGREED, SIGNED)
+		for enrollment in first["enrollments"]:
+			frappe.get_doc("Program Enrollment", enrollment).cancel()
+
+		second = reg.register_student(self.student, self.mandatory_modules(), AGREED, SIGNED)
+		self.assertNotEqual(
+			second["consent"], first["consent"], "the second registration needs its own consent"
+		)
+
+		self.assertEqual(
+			frappe.get_all(
+				"Registration Consent",
+				filters={"student": self.student, "academic_term": self.term, "docstatus": 1},
+				pluck="name",
+			),
+			[second["consent"]],
+			"the term should be left with exactly one consent in force",
+		)
+
+		# Cancelled, not deleted: what the student agreed to the first time is
+		# still what they agreed to, and the new record says what it replaced.
+		self.assertEqual(
+			frappe.db.get_value("Registration Consent", first["consent"], "docstatus"),
+			2,
+			"the consent for the undone registration should be cancelled, not removed",
+		)
+		self.assertEqual(
+			frappe.db.get_value("Registration Consent", second["consent"], "amended_from"),
+			first["consent"],
+			"the new consent should point back at the one it supersedes",
+		)
+
+	def test_the_patch_retires_consents_that_doubled_up_before_the_fix(self):
+		"""Terms that collected two consents before registering retired them.
+
+		Built the way the real ones were: registering as it behaved then, which
+		recorded a consent without looking for one already on record.
+		"""
+		from education_extension.patches import retire_superseded_consents as patch
+
+		first = reg.register_student(self.student, self.mandatory_modules(), AGREED, SIGNED)
+		for enrollment in first["enrollments"]:
+			frappe.get_doc("Program Enrollment", enrollment).cancel()
+
+		with mock.patch.object(reg, "_retire_stale_consent", return_value=None):
+			second = reg.register_student(self.student, self.mandatory_modules(), AGREED, SIGNED)
+
+		# The shape the patch exists for: both standing against the one term.
+		standing = {"student": self.student, "academic_term": self.term, "docstatus": 1}
+		self.assertEqual(frappe.db.count("Registration Consent", standing), 2)
+
+		patch.execute()
+
+		self.assertEqual(
+			frappe.get_all("Registration Consent", filters=standing, pluck="name"),
+			[second["consent"]],
+			"the consent the standing registration was made under is the one kept",
+		)
+		self.assertEqual(
+			frappe.db.get_value("Registration Consent", first["consent"], "docstatus"),
+			2,
+			"the one it superseded should be cancelled, not removed",
+		)
+
+	def test_the_patch_leaves_a_term_with_one_consent_alone(self):
+		result = reg.register_student(self.student, self.mandatory_modules(), AGREED, SIGNED)
+
+		from education_extension.patches import retire_superseded_consents as patch
+
+		patch.execute()
+
+		self.assertEqual(
+			frappe.db.get_value("Registration Consent", result["consent"], "docstatus"),
+			1,
+			"a term with one consent has nothing to retire",
 		)
 
 	def test_the_consent_records_what_was_shown(self):

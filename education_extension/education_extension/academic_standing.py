@@ -276,13 +276,26 @@ def standing_for(students, academic_term=None):
 
 	`override` is only looked up where there is a rule. With none, nobody is being
 	stopped and so nobody is being let through — and this runs on every load of
-	the registration page, which on most sites has no rule to apply.
+	the registration page, which on most sites has no rule to apply. That is also
+	why the term is optional here and required below: with no rule there is no
+	permission to find, and asking for a term nobody would use would make every
+	caller carry one for the sites that have no rule at all.
 	"""
 	students = list(dict.fromkeys(students))
 	if not students:
 		return {}
 
 	configured = rule()
+	# Refused rather than answered as best we can. A permission is granted for one
+	# term and counts for no other, so with no term there is nowhere to look for
+	# one — and the answer would come back saying a student a registrar has
+	# already waved through cannot register, which is the one answer that must
+	# never be given wrongly.
+	if configured and not academic_term:
+		frappe.throw(
+			_("Which term a student is being judged for has to be named before their "
+				"academic standing can be read.")
+		)
 	attempts = attempts_for(students)
 	starts = period_starts(configured.window) if configured else {}
 	permitted = overrides_for(students, academic_term) if configured else {}

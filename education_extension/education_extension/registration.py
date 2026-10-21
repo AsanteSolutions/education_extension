@@ -19,7 +19,7 @@ from frappe.utils import escape_html, formatdate, getdate, now, nowdate
 
 from education_extension.education_extension.doctype.registration_period.registration_period import (
 	next_period,
-	open_period,
+	open_periods,
 )
 from education_extension.education_extension.doctype.registration_settings.registration_settings import (
 	fee_block,
@@ -372,8 +372,8 @@ def options_for(student, on=None):
 	"""Everything the registration page needs, in one call."""
 	on = getdate(on or nowdate())
 
-	period = open_period(on=on)
-	if not period:
+	periods = open_periods(on=on)
+	if not periods:
 		upcoming = next_period(on=on)
 		return {
 			"state": "closed",
@@ -386,29 +386,20 @@ def options_for(student, on=None):
 	# would otherwise read their new enrolment as progress and advance them past
 	# the term they are standing in — reporting the block they are already taking
 	# as one that does not run this term.
-	registered = _existing_registration(student, period)
-	if registered:
-		return dict({"state": "registered", "period": _summary(period)}, **registered)
+	#
+	# Across every open window, not just the one chosen below: registering in one
+	# of them is still registering, and offering the student a second window
+	# because the first was not the one picked would be a way to enrol twice.
+	for period in periods:
+		registered = _existing_registration(student, period)
+		if registered:
+			return dict({"state": "registered", "period": _summary(period)}, **registered)
 
-	placement = next_block(student, period.academic_term)
-	if placement["block"] is None:
-		return {"state": "not_offered", "message": placement["reason"], "period": _summary(period)}
-
-	block = placement["block"]
-	program = programs_by_block().get(block)
-	if not program:
-		return {
-			"state": "not_offered",
-			"message": _("No programme offers {0}.").format(_semester_label(block)),
-			"period": _summary(period),
-		}
-
-	if not period.covers(program):
-		return {
-			"state": "closed",
-			"message": _("Registration is not open for {0} yet.").format(program),
-			"academic_term": period.academic_term,
-		}
+	offer = _offer_for(student, periods)
+	if not isinstance(offer, tuple):
+		# Nothing on offer, and `offer` is the reason.
+		return offer
+	period, block, program = offer
 
 	history = academic_history(student)
 	rules = prerequisite_rules()
@@ -457,6 +448,70 @@ def options_for(student, on=None):
 		# the wording the student is shown is the wording that gets recorded.
 		"declarations": declarations(student),
 	}
+
+
+def _offer_for(student, periods):
+	"""(period, block, programme) the student may register in, or why not.
+
+	Which programme a student is registering for depends on the block they move
+	into, which depends on the term — and the term is the period's. So the period
+	cannot be settled before the programme is known, and picking one first and
+	checking it afterwards got it wrong whenever more than one window was open:
+	the most recently opened was taken, and if that one named programmes the
+	student's was not among, the page said registration was closed while the
+	window that did cover them was open.
+
+	`open_period` takes a programme for exactly this reason and was never given
+	one. It cannot be, from here — so every open window is tried instead, and the
+	first that places the student in a programme it covers is the offer.
+
+	Returns a tuple on success. On failure it returns the reason from the first
+	window tried, which is the most recently opened and so the one the student is
+	most likely asking about.
+	"""
+	refusal = None
+
+	def because(reason):
+		nonlocal refusal
+		refusal = refusal if refusal is not None else reason
+
+	for period in periods:
+		placement = next_block(student, period.academic_term)
+		if placement["block"] is None:
+			because(
+				{
+					"state": "not_offered",
+					"message": placement["reason"],
+					"period": _summary(period),
+				}
+			)
+			continue
+
+		block = placement["block"]
+		program = programs_by_block().get(block)
+		if not program:
+			because(
+				{
+					"state": "not_offered",
+					"message": _("No programme offers {0}.").format(_semester_label(block)),
+					"period": _summary(period),
+				}
+			)
+			continue
+
+		if not period.covers(program):
+			because(
+				{
+					"state": "closed",
+					"message": _("Registration is not open for {0} yet.").format(program),
+					"academic_term": period.academic_term,
+				}
+			)
+			continue
+
+		return period, block, program
+
+	return refusal
 
 
 def _standing_block(student, academic_term):

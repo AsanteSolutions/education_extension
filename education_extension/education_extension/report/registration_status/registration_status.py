@@ -66,12 +66,7 @@ def rows(filters):
 	furthest = furthest_block_before(term)
 	this_term = registrations_for(term)
 
-	students = frappe.get_all(
-		"Student",
-		filters={"name": ["in", list(set(furthest) | set(this_term))]} if (furthest or this_term) else {"name": ""},
-		fields=["name", "student_name"],
-		order_by="name asc",
-	)
+	students = chaseable(furthest, this_term)
 
 	standings = standing_labels([student.name for student in students], term)
 
@@ -128,6 +123,36 @@ def rows(filters):
 	order = {NOT_REGISTERED: 0, REGISTERED: 1, NOT_THIS_TERM: 2}
 	out.sort(key=lambda row: (order[row["status"]], -row["needs_review"], row["student"]))
 	return out
+
+
+def chaseable(furthest, this_term):
+	"""Every student the question "have they registered?" can be asked about.
+
+	Read off the Student records rather than off enrolments. Built from enrolment
+	history, as it was, a student who had never been enrolled could not appear at
+	all -- so an intake in its first term was invisible on the one report that
+	exists to find the people who have not registered. A registrar opening it saw
+	only the years above and concluded everybody had registered, which is the
+	opposite of what the report is for.
+
+	A student who has left is left out, unless they registered for this term
+	anyway: that is a fact about the term and belongs on a report about it, where
+	being told to chase somebody who has gone does not. Nobody who appeared
+	before is dropped by that -- a student with enrolments is in `furthest` or
+	`this_term` either way.
+	"""
+	known = set(furthest) | set(this_term)
+
+	return [
+		student
+		for student in frappe.get_all(
+			"Student",
+			fields=["name", "student_name", "enabled"],
+			order_by="name asc",
+			limit_page_length=0,
+		)
+		if student.enabled or student.name in known
+	]
 
 
 def standing_labels(students, academic_term):

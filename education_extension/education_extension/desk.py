@@ -301,6 +301,14 @@ def _add_cards(cards):
 	workspace.content = json.dumps(content)
 	workspace.flags.ignore_permissions = True
 	_repair_missing_type(workspace)
+	# For the reason the sidebar save below sets it. This is the education app's
+	# page, carrying rows this app never wrote -- the docstring on `_cards` notes
+	# links get added to it by hand -- and one of them pointing at something that
+	# is gone would make this save refuse. That refusal lands inside an
+	# after_migrate hook, so it takes `bench migrate` down over a row nobody here
+	# touched. The rows this app adds are checked by `_exists` first, so none of
+	# them are what this covers.
+	workspace.flags.ignore_links = True
 	workspace.save()
 	return added or blocks
 
@@ -407,6 +415,11 @@ def _add_sidebar_items(cards, name=TARGET):
 			for target, kind in links
 			if _exists(target, kind) and target not in linked
 		]
+		# Counted as linked straight away, not on the next read of the sidebar.
+		# A target listed under two cards on the source page would otherwise pass
+		# this test twice and be written in twice -- `_place_card` keeps its own
+		# per-card set for the same reason.
+		linked.update(target for target, _kind in wanted)
 		added += _place_section(sidebar, label, icon, wanted)
 
 	if not added:

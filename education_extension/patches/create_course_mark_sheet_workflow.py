@@ -4,13 +4,15 @@
 """Create the workflow a Course Mark Sheet moves through.
 
 Shipped as a patch rather than a fixture so it can be created without exporting
-every other app's workflows alongside it. Idempotent: an existing workflow is
-left alone, so a site that has tuned the transitions keeps them.
+every other app's workflows alongside it. Idempotent: any workflow already on
+the document type is left alone, whatever it is called, so a site that has tuned
+the transitions keeps them.
 """
 
 import frappe
 
 WORKFLOW = "Course Mark Sheet Approval"
+DOCUMENT_TYPE = "Course Mark Sheet"
 
 # state, docstatus, the role that may act while the sheet sits here
 STATES = [
@@ -40,7 +42,26 @@ TRANSITIONS = [
 
 
 def execute():
-	if frappe.db.exists("Workflow", WORKFLOW):
+	# Guarded on the document type rather than on this workflow's name, because
+	# that is what installing one affects: `Workflow.set_active` clears is_active
+	# on every workflow sharing a document_type, so a site running a differently
+	# named workflow on Course Mark Sheet would have it switched off here without
+	# a word -- while sheets already in flight carried states the new one may not
+	# define. A site that has made its own arrangements keeps them.
+	existing = frappe.db.get_value(
+		"Workflow",
+		{"document_type": DOCUMENT_TYPE},
+		["name", "is_active"],
+		as_dict=True,
+	)
+	if existing:
+		if existing.name != WORKFLOW:
+			print(
+				"Education Extension: {0} already has the workflow {1!r}"
+				" (active: {2}); leaving it alone.".format(
+					DOCUMENT_TYPE, existing.name, bool(existing.is_active)
+				)
+			)
 		return
 
 	for state, _docstatus, _role in STATES:
@@ -59,7 +80,7 @@ def execute():
 		{
 			"doctype": "Workflow",
 			"workflow_name": WORKFLOW,
-			"document_type": "Course Mark Sheet",
+			"document_type": DOCUMENT_TYPE,
 			"workflow_state_field": "workflow_state",
 			"is_active": 1,
 			# Marks are entered against the sheet, so the entry states have to stay

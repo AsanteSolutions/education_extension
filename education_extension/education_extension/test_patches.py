@@ -11,11 +11,15 @@ the branch that decides *not* to act matters as much as the one that does.
 """
 
 import unittest
+from unittest import mock
 
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from education_extension.education_extension import lms_sync, student_permissions
 from education_extension.education_extension.testing import needs_doctype
+from education_extension.patches import convert_remark_codes as codes_patch
+from education_extension.patches import create_course_mark_sheet_workflow as workflow_patch
 from education_extension.patches import drop_stale_permission_overrides as overrides
 
 DOCTYPE = "Academic Remark"
@@ -171,10 +175,198 @@ class TestDroppingStalePermissionOverrides(IntegrationTestCase):
 					)
 
 
+class TestTheWorkflowPatchLeavesATunedSiteAlone(IntegrationTestCase):
+	"""The guard has to be on the document type, not on this workflow's name.
+
+	`Workflow.set_active` clears `is_active` on every workflow sharing a
+	`document_type`, so inserting ours switches off whatever was there. Guarding
+	on the name let that happen to any site whose workflow is called something
+	else -- silently, and with sheets already in flight carrying states the new
+	workflow may not define.
+	"""
+
+	def setUp(self):
+		needs_doctype(self, "Workflow", "Course Mark Sheet")
+		self.existing = frappe.db.get_value(
+			"Workflow", {"document_type": workflow_patch.DOCUMENT_TYPE}, "name"
+		)
+		if not self.existing:
+			self.skipTest("this site has no Course Mark Sheet workflow to protect")
+
+	def tearDown(self):
+		frappe.db.rollback()
+
+	def test_a_differently_named_workflow_is_left_active(self):
+		renamed = "Locally Tuned Sheet Approval"
+		frappe.rename_doc("Workflow", self.existing, renamed, force=True)
+		frappe.db.set_value("Workflow", renamed, "is_active", 1)
+
+		workflow_patch.execute()
+
+		self.assertFalse(
+			frappe.db.exists("Workflow", workflow_patch.WORKFLOW),
+			"the patch installed its own workflow over a tuned one",
+		)
+		self.assertEqual(
+			frappe.db.get_value("Workflow", renamed, "is_active"),
+			1,
+			"the site's own workflow was switched off",
+		)
+
+	def test_it_still_does_nothing_when_ours_is_the_one_on_file(self):
+		"""The case every site already in service is in."""
+		workflow_patch.execute()
+		self.assertEqual(
+			frappe.get_all(
+				"Workflow",
+				filters={"document_type": workflow_patch.DOCUMENT_TYPE},
+				pluck="name",
+			),
+			[self.existing],
+		)
+
+
+class TestTheRemarkCodePatchChecksTheColumn(IntegrationTestCase):
+	"""It runs in pre_model_sync, before the doctypes are migrated.
+
+	A release that adds a field and ships this patch together finds the table
+	there and the column not, and a read of the missing column would abort the
+	whole migrate at its first patch -- before anything had been synced.
+	"""
+
+	def tearDown(self):
+		frappe.db.rollback()
+
+	def test_a_field_the_table_does_not_carry_yet_is_skipped(self):
+		with mock.patch.object(
+			codes_patch, "FIELDS", ((DOCTYPE, "not_added_until_this_release"),)
+		):
+			codes_patch.execute()
+
+	def test_the_real_fields_are_still_converted(self):
+		"""The control: the guard must not be skipping everything."""
+		self.assertTrue(frappe.db.has_column(DOCTYPE, "remark"))
+		codes_patch.execute()
+
+
+class TestConfiningAStudentWhoAlreadyHasANarrowPermission(IntegrationTestCase):
+	"""A narrow User Permission is not the confinement.
+
+	One left `applicable_for` a single doctype -- which is how Frappe's own UI
+	offers to make them -- restricts that doctype and nothing else, Student
+	included. Treating it as "already confined" left the student able to list
+	every other student, and said so in the patch's own report.
+	"""
+
+	def setUp(self):
+		needs_doctype(self, "Student", "User Permission")
+		student = frappe.get_all("Student", limit=1, pluck="name")
+		if not student:
+			self.skipTest("this site has no students")
+		self.student = student[0]
+		self.user = "test-narrow-permission@example.invalid"
+
+		if not frappe.db.exists("User", self.user):
+			user = frappe.new_doc("User")
+			user.update(
+				{"email": self.user, "first_name": "Narrow", "send_welcome_email": 0}
+			)
+			user.flags.ignore_permissions = True
+			user.insert()
+
+	def tearDown(self):
+		frappe.db.rollback()
+
+	def narrow(self):
+		permission = frappe.new_doc("User Permission")
+		permission.update(
+			{
+				"user": self.user,
+				"allow": "Student",
+				"for_value": self.student,
+				"apply_to_all_doctypes": 0,
+				"applicable_for": "Fees",
+			}
+		)
+		permission.flags.ignore_permissions = True
+		permission.insert()
+		return permission.name
+
+	def test_a_narrow_permission_does_not_count_as_confined(self):
+		self.narrow()
+		self.assertFalse(
+			student_permissions.existing_permission(self.user, self.student),
+			"a permission covering one doctype was read as confining every one",
+		)
+
+	def test_confine_still_creates_the_broad_one_alongside_it(self):
+		self.narrow()
+		self.assertEqual(student_permissions.confine(self.student, self.user), "created")
+		self.assertTrue(
+			student_permissions.existing_permission(self.user, self.student),
+			"the broad permission was not created",
+		)
+
+	def test_a_broad_permission_is_still_recognised(self):
+		"""The control: having confined someone, this must not do it twice."""
+		self.assertEqual(student_permissions.confine(self.student, self.user), "created")
+		self.assertEqual(student_permissions.confine(self.student, self.user), "already")
+
+
+class TestTheServiceUserIsMadeOnEveryMigrate(IntegrationTestCase):
+	"""The patch that made it could only act on the site as it stood that day.
+
+	A site without the LMS had no `Moderator` role to grant, so it made nothing,
+	and a one-shot patch is never asked again. Installing the LMS afterwards left
+	`enqueue` declining to queue for ever, with nothing to log.
+	"""
+
+	def setUp(self):
+		if not frappe.db.exists("Role", lms_sync.SERVICE_ROLE):
+			self.skipTest("no LMS on this site")
+
+	def tearDown(self):
+		frappe.db.rollback()
+
+	def test_it_creates_the_account_when_it_is_missing(self):
+		if frappe.db.exists("User", lms_sync.SERVICE_USER):
+			frappe.delete_doc(
+				"User", lms_sync.SERVICE_USER, force=True, ignore_permissions=True
+			)
+		self.assertFalse(lms_sync.service_user_ready())
+
+		self.assertTrue(lms_sync.ensure_service_user())
+		self.assertTrue(
+			lms_sync.service_user_ready(), "the account was not left ready to run jobs"
+		)
+
+	def test_it_grants_back_a_role_that_was_taken_away(self):
+		lms_sync.ensure_service_user()
+		user = frappe.get_doc("User", lms_sync.SERVICE_USER)
+		user.roles = [row for row in user.roles if row.role != lms_sync.SERVICE_ROLE]
+		user.flags.ignore_permissions = True
+		user.save()
+		self.assertFalse(lms_sync.service_user_ready())
+
+		lms_sync.ensure_service_user()
+		self.assertTrue(lms_sync.service_user_ready())
+
+	def test_it_is_idempotent(self):
+		"""It runs on every migrate, so running twice has to be uneventful."""
+		self.assertTrue(lms_sync.ensure_service_user())
+		self.assertTrue(lms_sync.ensure_service_user())
+
+
 def run_tests(verbosity=2):
 	"""Run these from a console, since bench run-tests cannot bootstrap this site."""
 	suite = unittest.TestSuite()
 	loader = unittest.TestLoader()
-	for case in (TestDroppingStalePermissionOverrides,):
+	for case in (
+		TestDroppingStalePermissionOverrides,
+		TestTheWorkflowPatchLeavesATunedSiteAlone,
+		TestTheRemarkCodePatchChecksTheColumn,
+		TestConfiningAStudentWhoAlreadyHasANarrowPermission,
+		TestTheServiceUserIsMadeOnEveryMigrate,
+	):
 		suite.addTests(loader.loadTestsFromTestCase(case))
 	return unittest.TextTestRunner(verbosity=verbosity).run(suite)

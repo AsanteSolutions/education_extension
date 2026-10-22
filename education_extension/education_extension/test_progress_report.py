@@ -287,6 +287,158 @@ def an_account_without_staff_roles():
 	return None
 
 
+class TestAnAegrotatIsSeenHoweverItWasRecorded(IntegrationTestCase):
+	"""An aegrotat sitting moves the report onto its own Date of Issue.
+
+	This matched only the AEGRO-prefixed assessment group — the convention the
+	sitting field replaced — and read Assessment Result directly. So an aegrotat
+	recorded the way the form now asks for it, or held on an approved Course Mark
+	Sheet, counted as none at all, and the report printed the Standard date.
+	"""
+
+	COURSE = "ANH9999 - Test Course"
+
+	def setUp(self):
+		needs_doctype(self, "Student Progress Report")
+		self.doc = frappe._dict(
+			{"student": "S1", "academic_year": "2026", "academic_term": "2026 (Term)"}
+		)
+
+	def mark(self, group, sitting):
+		return {
+			"assessment_group": group,
+			"sitting": sitting,
+			"total_score": 55,
+			"maximum_score": 100,
+		}
+
+	def seen(self, *rows):
+		"""Through `get_assessment_results`, which is what resolves an approved
+		sheet ahead of Assessment Result. Going through it is the half of this
+		fix that makes a sheet-marked aegrotat visible at all."""
+		with patch.object(
+			marking, "get_assessment_results", return_value={self.COURSE: list(rows)}
+		):
+			return report._has_aegrotat_result(self.doc)
+
+	def test_a_sitting_recorded_on_the_field_counts(self):
+		"""The way the form asks for it, and the case that was missed."""
+		self.assertTrue(self.seen(self.mark("Theory Exam", "Aegrotat")))
+
+	def test_the_old_group_naming_still_counts(self):
+		"""A mark can still be entered against one of those groups on the
+		standard form, where nothing prompts for a sitting."""
+		self.assertTrue(self.seen(self.mark("AEGRO Theory Exam", "Main")))
+
+	def test_a_term_with_no_aegrotat_is_not_one(self):
+		self.assertFalse(self.seen(self.mark("Theory Exam", "Main")))
+
+	def test_a_supplementary_is_not_an_aegrotat(self):
+		"""Two different sittings, with two different issue dates."""
+		self.assertFalse(self.seen(self.mark("Supplementary Exam", "Supplementary")))
+
+	def test_it_puts_the_report_on_the_aegrotat_issue_date(self):
+		"""The knock-on, as for the supplementary column beside it."""
+		by_course = {self.COURSE: [self.mark("Theory Exam", "Aegrotat")]}
+		with patch.object(marking, "get_assessment_results", return_value=by_course):
+			with patch.object(report, "get_supplementary_remarks", return_value={}):
+				with patch.object(report, "_has_remarked_result", return_value=False):
+					kinds = report._issue_date_kinds(self.doc)
+
+		self.assertIn(report.ISSUE_DATE_AEGROTAT, kinds)
+
+	def test_every_aegrotat_on_this_site_is_seen(self):
+		"""Against the real records, so the two cannot drift apart silently."""
+		needs_education_app(self)
+		rows = frappe.get_all(
+			"Assessment Result",
+			filters={"custom_sitting": "Aegrotat", "docstatus": 1},
+			fields=["student", "academic_term"],
+			limit_page_length=0,
+		)
+		if not rows:
+			self.skipTest("no student on this site has an aegrotat mark")
+
+		for row in {(r.student, r.academic_term): r for r in rows}.values():
+			doc = frappe._dict(
+				{
+					"student": row.student,
+					"academic_term": row.academic_term,
+					"academic_year": frappe.db.get_value(
+						"Academic Term", row.academic_term, "academic_year"
+					),
+				}
+			)
+			self.assertTrue(
+				report._has_aegrotat_result(doc),
+				"{0} has an aegrotat mark for {1} that the report cannot see".format(
+					row.student, row.academic_term
+				),
+			)
+
+
+class TestAnAmendedSupplementaryCommentIsARemarking(IntegrationTestCase):
+	"""`_has_remarked_result` reads the three doctypes `_last_marks_change` does.
+
+	It read two. A supplementary comment that was amended is a remarked result
+	exactly as a main one is, and leaving it out dated the report as though
+	nothing had been looked at again.
+	"""
+
+	def setUp(self):
+		needs_education_app(self)
+		needs_doctype(self, "Supplementary Academic Remark", "Student Progress Report")
+
+		result = frappe.get_all(
+			"Assessment Result",
+			filters={"docstatus": 1},
+			fields=["student", "course", "academic_term"],
+			limit=1,
+		)
+		if not result:
+			self.skipTest("this site has no results to hang a comment on")
+
+		self.keys = dict(result[0])
+		self.keys["academic_year"] = frappe.db.get_value(
+			"Academic Term", self.keys["academic_term"], "academic_year"
+		)
+		self.doc = frappe._dict(self.keys)
+
+		codes = marking.remark_codes("Supplementary Academic Remark")
+		if not codes:
+			self.skipTest("Supplementary Academic Remark offers no codes")
+		self.code = codes[0]
+
+		# Only observable on a student and term nothing else has remarked.
+		if report._has_remarked_result(self.doc):
+			self.skipTest("that student and term already count as remarked")
+
+	def tearDown(self):
+		frappe.db.rollback()
+
+	def test_an_amended_supplementary_comment_counts_as_a_remarking(self):
+		first = frappe.get_doc(dict(self.keys, doctype="Supplementary Academic Remark", supp_remark=self.code))
+		first.insert()
+		first.submit()
+
+		# Correcting a submitted document in Frappe is a cancel and an amend, and
+		# the amendment is the trace this looks for.
+		self.assertFalse(
+			report._has_remarked_result(self.doc), "filing a comment is not a remarking"
+		)
+		first.cancel()
+		amended = frappe.copy_doc(first)
+		amended.amended_from = first.name
+		amended.docstatus = 0
+		amended.insert()
+		amended.submit()
+
+		self.assertTrue(
+			report._has_remarked_result(self.doc),
+			"an amended supplementary comment was not counted as a remarking",
+		)
+
+
 def run_tests(verbosity=2):
 	"""Run these from a console, since bench run-tests cannot bootstrap this site."""
 	suite = unittest.TestSuite()
@@ -295,6 +447,8 @@ def run_tests(verbosity=2):
 		TestOnlyStaffMayPrintAReport,
 		TestTheFilenameComesFromTheRecord,
 		TestTheSupplementaryColumnAgreesWithThePortal,
+		TestAnAegrotatIsSeenHoweverItWasRecorded,
+		TestAnAmendedSupplementaryCommentIsARemarking,
 	):
 		suite.addTests(loader.loadTestsFromTestCase(case))
 	return unittest.TextTestRunner(verbosity=verbosity).run(suite)

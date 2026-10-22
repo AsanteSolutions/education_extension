@@ -32,8 +32,23 @@ def is_staff(user):
 
 
 def existing_permission(user, student):
+	"""A permission that actually confines this user, not merely one that exists.
+
+	`apply_to_all_doctypes` is the whole point of the one `confine` creates. A
+	narrow permission -- one left `applicable_for` a single doctype, which is how
+	Frappe's own UI offers to create them -- restricts that doctype and nothing
+	else, Student itself included. Counting it as the confinement already being
+	in place is how a student kept a full list of every other student while this
+	reported "already".
+	"""
 	return frappe.db.exists(
-		"User Permission", {"user": user, "allow": "Student", "for_value": student}
+		"User Permission",
+		{
+			"user": user,
+			"allow": "Student",
+			"for_value": student,
+			"apply_to_all_doctypes": 1,
+		},
 	)
 
 

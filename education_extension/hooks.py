@@ -102,12 +102,22 @@ add_to_apps_screen = [
 # ------------
 
 # before_install = "education_extension.install.before_install"
-after_install = "education_extension.education_extension.desk.apply_desk_records"
+after_install = [
+	"education_extension.education_extension.desk.apply_desk_records",
+	# On a fresh install the patches are recorded as done without being run, so
+	# the one that first created this account never fires here.
+	"education_extension.education_extension.lms_sync.ensure_service_user",
+]
 
 # Runs last, after the education app has re-synced its own Workspace and
 # Workspace Sidebar over whatever was in the database. Anything added to those
 # by hand does not survive a migrate; this re-applies our links so they do.
-after_migrate = ["education_extension.education_extension.desk.apply_desk_records"]
+after_migrate = [
+	"education_extension.education_extension.desk.apply_desk_records",
+	# Every migrate, not once: a site that installs the LMS after this app did
+	# has no service user, and the patch that made it is never asked again.
+	"education_extension.education_extension.lms_sync.ensure_service_user",
+]
 
 # Uninstallation
 # ------------

@@ -237,6 +237,77 @@ class TestCopyOntoEducation(IntegrationTestCase):
 		desk.add_to_education_workspace()
 		self.assertEqual(self._snapshot(), before)
 
+	def test_a_dangling_row_somebody_else_left_does_not_stop_the_migrate(self):
+		"""This page is the education app's, and rows get added to it by hand.
+
+		One of them pointing at something that has since gone makes an ordinary
+		save refuse -- and this save runs inside an after_migrate hook, so the
+		refusal takes `bench migrate` down over a row this app never wrote. The
+		sidebar path has always said so; the workspace path did not.
+		"""
+		self.addCleanup(frappe.db.rollback)
+
+		# Every save here goes through the guard: this is the education app's own
+		# page, and on a developer_mode site an unguarded save writes it back out
+		# over that app's file.
+		with desk._without_writing_to_the_source_tree():
+			workspace = frappe.get_doc("Workspace", desk.TARGET)
+			workspace.append(
+				"links",
+				{
+					"type": "Link",
+					"label": "Left Behind",
+					"link_type": "DocType",
+					"link_to": "A Doctype That Was Deleted",
+				},
+			)
+			workspace.flags.ignore_permissions = True
+			workspace.flags.ignore_links = True
+			workspace.save()
+
+			# Forces a save: with nothing to add, `_add_cards` returns early and
+			# the dangling row is never put in front of the validator at all.
+			desk._add_cards([("Dangling Row Test", "folder", [("Student", "DocType")])])
+
+	def test_a_link_under_two_cards_is_added_to_the_sidebar_once(self):
+		"""`linked` is read once, so it has to be kept up to date as rows go in.
+
+		A target listed under two cards on the source page passed the "not already
+		there" test twice and was written into the sidebar twice. `_place_card`
+		keeps a per-card set against exactly this.
+		"""
+		if not frappe.db.exists("Workspace Sidebar", desk.TARGET):
+			self.skipTest("this site has no education sidebar")
+
+		target = "Course Mark Scheme"
+		if not desk._exists(target, "DocType"):
+			self.skipTest("{0} is not installed".format(target))
+
+		self.addCleanup(frappe.db.rollback)
+
+		with desk._without_writing_to_the_source_tree():
+			# Out of the sidebar first, so there is something for both to add.
+			sidebar = frappe.get_doc("Workspace Sidebar", desk.TARGET)
+			sidebar.items = [row for row in sidebar.items if row.link_to != target]
+			sidebar.flags.ignore_permissions = True
+			sidebar.flags.ignore_links = True
+			sidebar.save()
+
+			desk._add_sidebar_items(
+				[
+					("Twice Listed A", "folder", [(target, "DocType")]),
+					("Twice Listed B", "folder", [(target, "DocType")]),
+				],
+				desk.TARGET,
+			)
+
+		rows = frappe.get_doc("Workspace Sidebar", desk.TARGET).items
+		self.assertEqual(
+			[row.link_to for row in rows].count(target),
+			1,
+			"a link listed under two cards was written into the sidebar twice",
+		)
+
 	def _snapshot(self):
 		state = {}
 		for doctype, table in (("Workspace", "links"), ("Workspace Sidebar", "items")):

@@ -82,6 +82,50 @@ def service_user_ready():
 	return SERVICE_ROLE in frappe.get_roles(SERVICE_USER)
 
 
+def ensure_service_user():
+	"""Create the account the jobs run as, or grant it the role it is missing.
+
+	Runs on every migrate, not once. The patch that first created this account
+	could only act on the site as it was that day: a site without the LMS had no
+	`Moderator` role to grant, so it created nothing, and a one-shot patch is
+	never asked again. Installing the LMS afterwards left `enqueue` returning
+	early for ever -- silently, since there is nothing to log when the decision
+	is "do not queue" -- and the mirror this module promises simply never ran.
+
+	Idempotent, and it says what it did so a migrate that fixes a site this
+	happened to is not itself silent.
+	"""
+	if not frappe.db.exists("Role", SERVICE_ROLE):
+		# No LMS on this site, so nothing to mirror into and no role to hold.
+		return False
+
+	if not frappe.db.exists("User", SERVICE_USER):
+		user = frappe.new_doc("User")
+		user.update(
+			{
+				"email": SERVICE_USER,
+				"first_name": "LMS Sync",
+				"user_type": "System User",
+				"send_welcome_email": 0,
+				# No password is ever set, so it cannot be signed in to. It exists
+				# only to be the user a background job runs as.
+				"enabled": 1,
+			}
+		)
+		user.flags.ignore_permissions = True
+		user.insert()
+		print("LMS sync: created service user {0}".format(SERVICE_USER))
+
+	user = frappe.get_doc("User", SERVICE_USER)
+	if SERVICE_ROLE not in [row.role for row in user.roles]:
+		user.append("roles", {"role": SERVICE_ROLE})
+		user.flags.ignore_permissions = True
+		user.save()
+		print("LMS sync: granted {0} to {1}".format(SERVICE_ROLE, SERVICE_USER))
+
+	return True
+
+
 def enqueue(method, **kwargs):
 	"""Queue a mirroring job, after the transaction that triggered it commits.
 

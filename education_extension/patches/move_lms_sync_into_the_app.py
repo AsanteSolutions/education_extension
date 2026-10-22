@@ -14,7 +14,7 @@ version had to use.
 
 import frappe
 
-from education_extension.education_extension.lms_sync import SERVICE_ROLE, SERVICE_USER
+from education_extension.education_extension.lms_sync import SERVICE_ROLE, ensure_service_user
 
 # The doctypes the mirroring binds together. A document event script on any of
 # these is a candidate whatever it is called, which is the point: checking by
@@ -29,34 +29,16 @@ def execute():
 
 
 def create_service_user():
-	if not frappe.db.exists("Role", SERVICE_ROLE):
-		# No LMS on this site, so nothing to mirror into and no role to hold.
+	"""Make the account now, and leave it to the migrate hook to keep making it.
+
+	The work itself lives in `lms_sync` and runs on every migrate. It has to:
+	this patch can only act on the site as it stands today, and a site that
+	installs the LMS tomorrow would otherwise never be asked again -- the account
+	would never exist, and `enqueue` would go on declining to queue anything with
+	nothing anywhere saying why.
+	"""
+	if not ensure_service_user():
 		print("LMS sync: no {0} role on this site, service user not created".format(SERVICE_ROLE))
-		return
-
-	if not frappe.db.exists("User", SERVICE_USER):
-		user = frappe.new_doc("User")
-		user.update(
-			{
-				"email": SERVICE_USER,
-				"first_name": "LMS Sync",
-				"user_type": "System User",
-				"send_welcome_email": 0,
-				# No password is ever set, so it cannot be signed in to. It exists
-				# only to be the user a background job runs as.
-				"enabled": 1,
-			}
-		)
-		user.flags.ignore_permissions = True
-		user.insert()
-		print("LMS sync: created service user {0}".format(SERVICE_USER))
-
-	user = frappe.get_doc("User", SERVICE_USER)
-	if SERVICE_ROLE not in [row.role for row in user.roles]:
-		user.append("roles", {"role": SERVICE_ROLE})
-		user.flags.ignore_permissions = True
-		user.save()
-		print("LMS sync: granted {0} to {1}".format(SERVICE_ROLE, SERVICE_USER))
 
 
 def mirrors_the_lms(script):

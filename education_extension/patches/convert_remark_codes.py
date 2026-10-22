@@ -81,7 +81,12 @@ def execute():
 	unresolved = {}
 
 	for doctype, fieldname in FIELDS:
-		if not frappe.db.table_exists(doctype):
+		# The column, not just the table. This runs in pre_model_sync, before the
+		# doctypes are migrated, so a release that adds the field and ships this
+		# patch together finds the table already there and the column not yet --
+		# and the read below would abort the whole migrate at its first patch,
+		# before anything had been synced.
+		if not (frappe.db.table_exists(doctype) and frappe.db.has_column(doctype, fieldname)):
 			continue
 
 		for row in frappe.get_all(doctype, fields=["name", fieldname]):

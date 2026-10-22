@@ -29,18 +29,7 @@ frappe.query_reports['Module Registrations'] = {
 	onload: (report) => {
 		// Default to the term with a registration window, the same as
 		// Registration Status, so the two open on the same period.
-		if (report.get_filter_value('academic_term')) return;
-		frappe.db
-			.get_list('Registration Period', {
-				fields: ['academic_term'],
-				order_by: 'opens_on desc',
-				limit: 1,
-			})
-			.then((periods) => {
-				if (periods && periods.length) {
-					report.set_filter_value('academic_term', periods[0].academic_term);
-				}
-			});
+		education_extension.default_report_term(report);
 	},
 
 	// The two columns anyone scans this list for: a place still to be confirmed,

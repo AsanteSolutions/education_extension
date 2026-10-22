@@ -172,6 +172,68 @@ class TestAppPage(IntegrationTestCase):
 		return tiles[0]
 
 
+class TestTheSharedDeskScript(IntegrationTestCase):
+	"""The desk script three reports, a page and a form all reach for.
+
+	It is included as a plain path rather than a bundle, which is what lets it
+	reach a site without `bench build`: `/assets/education_extension` is a
+	symlink to this app's public directory, and Frappe only consults the built
+	asset manifest for a path with `.bundle.` in it. That is also what makes
+	this worth a test -- a path that no longer resolves breaks five screens at
+	once, and nothing else would notice.
+	"""
+
+	def test_the_script_the_hook_names_is_on_disk_where_it_is_served_from(self):
+		import os
+
+		included = [
+			path
+			for path in frappe.get_hooks("app_include_js") or []
+			if "education_extension" in path
+		]
+		self.assertTrue(included, "the app includes no desk script")
+
+		for path in included:
+			self.assertNotIn(
+				".bundle.",
+				path,
+				"a bundled path would need `bench build` before it resolved",
+			)
+			served = os.path.join(frappe.local.sites_path, path.lstrip("/"))
+			self.assertTrue(
+				os.path.isfile(served), "{0} is not served from {1}".format(path, served)
+			)
+
+	def test_every_screen_that_uses_it_is_covered_by_the_hook(self):
+		"""The five scripts call it; none of them loads it themselves."""
+		import os
+
+		app = os.path.dirname(os.path.dirname(os.path.abspath(desk.__file__)))
+		callers = [
+			"education_extension/report/academic_exclusions/academic_exclusions.js",
+			"education_extension/report/registration_status/registration_status.js",
+			"education_extension/report/module_registrations/module_registrations.js",
+			"education_extension/page/sign_registration_forms/sign_registration_forms.js",
+			"education_extension/doctype/registration_override/registration_override.js",
+		]
+		for relative in callers:
+			path = os.path.join(app, relative)
+			if not os.path.isfile(path):
+				self.skipTest("{0} is not in this checkout".format(relative))
+			with open(path) as handle:
+				source = handle.read()
+			self.assertIn(
+				"education_extension.",
+				source,
+				"{0} does not use the shared script".format(relative),
+			)
+			self.assertNotIn(
+				"opens_on desc",
+				source,
+				"{0} still has its own copy of the term lookup".format(relative),
+			)
+
+
 class TestCopyOntoEducation(IntegrationTestCase):
 	"""The links this app adds to the Education page."""
 
@@ -539,6 +601,11 @@ def run_tests(verbosity=2):
 	"""Run these from a console, since bench run-tests cannot bootstrap this site."""
 	suite = unittest.TestSuite()
 	loader = unittest.TestLoader()
-	for case in (TestAppPage, TestCopyOntoEducation, TestTheDashboardTheSidebarPointsAt):
+	for case in (
+		TestAppPage,
+		TestTheSharedDeskScript,
+		TestCopyOntoEducation,
+		TestTheDashboardTheSidebarPointsAt,
+	):
 		suite.addTests(loader.loadTestsFromTestCase(case))
 	return unittest.TextTestRunner(verbosity=verbosity).run(suite)

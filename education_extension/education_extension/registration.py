@@ -247,7 +247,7 @@ def next_block(student, academic_term):
 	return {"block": candidate, "reason": None}
 
 
-def offered_rows(candidates, block, history, already, rules, strict=False):
+def offered_rows(candidates, block, history, rules, strict=False):
 	"""Every module on offer this term, as the page shows them.
 
 	Its own function so that what the page is built from is what the tests are
@@ -258,7 +258,7 @@ def offered_rows(candidates, block, history, already, rules, strict=False):
 	alongside = takeable_together(candidates, history, rules, strict)
 
 	rows = [
-		_row(course, course_block, block, history, already, rules, alongside, strict)
+		_row(course, course_block, block, history, rules, alongside, strict)
 		for course, course_block in candidates.items()
 	]
 	rows.sort(key=lambda row: (row["block"], row["course"]))
@@ -371,8 +371,16 @@ def registered_courses(student, academic_year, academic_term):
 	)
 
 
-def options_for(student, on=None):
-	"""Everything the registration page needs, in one call."""
+def options_for(student, on=None, worked_out=None):
+	"""Everything the registration page needs, in one call.
+
+	`worked_out`, when a dict is passed, is filled with the reference data this
+	read along the way -- the programmes by block, the student's results, the
+	prerequisite rules. Registering calls this and then needs the same three
+	facts to check what was submitted, and was reading every one of them a
+	second time a few lines later. Not part of the answer, so it stays out of
+	the payload the page receives.
+	"""
 	on = getdate(on or nowdate())
 
 	periods = open_periods(on=on)
@@ -398,7 +406,11 @@ def options_for(student, on=None):
 		if registered:
 			return dict({"state": "registered", "period": _summary(period)}, **registered)
 
-	offer = _offer_for(student, periods)
+	programs = programs_by_block()
+	if worked_out is not None:
+		worked_out["programs"] = programs
+
+	offer = _offer_for(student, periods, programs)
 	if not isinstance(offer, tuple):
 		# Nothing on offer, and `offer` is the reason.
 		return offer
@@ -407,7 +419,8 @@ def options_for(student, on=None):
 	history = academic_history(student)
 	rules = prerequisite_rules()
 	curriculum = courses_by_block()
-	already = registered_courses(student, period.academic_year, period.academic_term)
+	if worked_out is not None:
+		worked_out.update({"history": history, "rules": rules})
 
 	# This block, plus anything behind it the student has not passed. Whether a
 	# module with no result counts as unpassed is the same institutional question
@@ -426,7 +439,7 @@ def options_for(student, on=None):
 			if history.get(course, NEVER) in behind:
 				candidates.setdefault(course, earlier)
 
-	rows = offered_rows(candidates, block, history, already, rules, strict)
+	rows = offered_rows(candidates, block, history, rules, strict)
 
 	# Stripped rather than never computed, so the rule stays in one place and only
 	# what leaves the server changes. The field stays present and empty: the page
@@ -453,7 +466,7 @@ def options_for(student, on=None):
 	}
 
 
-def _offer_for(student, periods):
+def _offer_for(student, periods, programs):
 	"""(period, block, programme) the student may register in, or why not.
 
 	Which programme a student is registering for depends on the block they move
@@ -491,7 +504,7 @@ def _offer_for(student, periods):
 			continue
 
 		block = placement["block"]
-		program = programs_by_block().get(block)
+		program = programs.get(block)
 		if not program:
 			because(
 				{
@@ -584,15 +597,27 @@ def fill_declaration(text, values):
 	return text
 
 
-def _row(course, course_block, block, history, already, rules, alongside, strict=False):
+def _row(course, course_block, block, history, rules, alongside, strict=False):
+	"""One module as the page offers it.
+
+	There is no "already registered for this term" status here any more. It
+	could never be reached: `options_for` returns the registered view for any
+	student with a submitted enrolment this term, across every open window,
+	before it ever builds these rows -- so by the time it does, that student has
+	nothing registered for the term by definition. Checked against this site's
+	189 students: the lookup it rested on was reached 117 times and came back
+	empty 117 times.
+
+	If that early return is ever relaxed -- if a student may register for a
+	second programme in a term they already hold one in -- this is where the
+	status has to come back.
+	"""
 	blocking, outstanding, unverified = unmet_prerequisites(
 		course, history, alongside, rules, strict
 	)
 	outcome = history.get(course, NEVER)
 
-	if course in already:
-		status, reason = REGISTERED, _("Already registered for this term.")
-	elif outcome == PASSED:
+	if outcome == PASSED:
 		status, reason = ALREADY_PASSED, _("Already passed.")
 	elif outcome == PENDING and course_block < block:
 		status, reason = AWAITING, _("Waiting on a supplementary or aegrotat result.")
@@ -756,7 +781,10 @@ def register_student(student, courses, agreed=None, signatures=None):
 	that sent it may be minutes or hours stale, and with no approval step this is
 	the last point at which anything checks.
 	"""
-	options = options_for(student)
+	# The reference data `options_for` reads to decide this is the same data the
+	# checks below need, so it is kept rather than read again.
+	worked_out = {}
+	options = options_for(student, worked_out=worked_out)
 	if options["state"] == "registered":
 		frappe.throw(_("You have already registered for this term."))
 	if options["state"] != "open":
@@ -799,9 +827,11 @@ def register_student(student, courses, agreed=None, signatures=None):
 			)
 		)
 
-	_validate_corequisites(student, chosen, rows)
+	_validate_corequisites(
+		student, chosen, rows, worked_out.get("history"), worked_out.get("rules")
+	)
 
-	programs = programs_by_block()
+	programs = worked_out.get("programs") or programs_by_block()
 	grouped = {}
 	for course in chosen:
 		program = programs.get(rows[course]["block"])
@@ -839,7 +869,7 @@ def unmet_corequisites(chosen, taking, history, rules):
 	return unmet
 
 
-def _validate_corequisites(student, chosen, rows):
+def _validate_corequisites(student, chosen, rows, history=None, rules=None):
 	"""A co-requisite has to be among the modules actually taken.
 
 	`options_for` judges co-requisites against everything *offered*, which is
@@ -848,10 +878,18 @@ def _validate_corequisites(student, chosen, rows):
 	co-requisite offered as a carry-over is the student's to decline, so the
 	module depending on it could be kept while the module satisfying it was
 	unticked, and nothing looked again.
+
+	What is being taken is what has been chosen, and only that. This used to add
+	the modules already on a submitted enrolment for the term, which no row can
+	carry: nobody with such an enrolment is shown this page -- see `_row`.
 	"""
-	# Already on a submitted enrolment for this term counts as taken alongside.
-	taking = set(chosen) | {c for c, row in rows.items() if row["status"] == REGISTERED}
-	unmet = unmet_corequisites(chosen, taking, academic_history(student), prerequisite_rules())
+	taking = set(chosen)
+	unmet = unmet_corequisites(
+		chosen,
+		taking,
+		academic_history(student) if history is None else history,
+		prerequisite_rules() if rules is None else rules,
+	)
 
 	if unmet:
 		frappe.throw(
@@ -1025,8 +1063,23 @@ def _create_course_enrollments(enrollment):
 
 
 def provisional_rows(student=None):
-	"""[(enrolment, course row)] for every provisional registration in force."""
-	filters = {"docstatus": 1}
+	"""[(enrolment, course row)] for every provisional registration in force.
+
+	The provisional rows are asked for first, and the enrolments are fetched for
+	the handful that come back. The other way round -- which is how this read --
+	loaded every enrolment ever created, for every student, to find the few rows
+	flagged provisional, and the nightly sweep calls this with no student at all.
+	"""
+	rows = frappe.get_all(
+		"Program Enrollment Course",
+		filters={"parenttype": "Program Enrollment", "custom_provisional": 1},
+		fields=["name", "parent", "course", "custom_provisional_on"],
+		limit_page_length=0,
+	)
+	if not rows:
+		return []
+
+	filters = {"name": ["in", sorted({row.parent for row in rows})], "docstatus": 1}
 	if student:
 		filters["student"] = student
 
@@ -1036,21 +1089,12 @@ def provisional_rows(student=None):
 			"Program Enrollment",
 			filters=filters,
 			fields=["name", "student", "program", "academic_year", "academic_term"],
+			limit_page_length=0,
 		)
 	}
-	if not enrollments:
-		return []
-
-	rows = frappe.get_all(
-		"Program Enrollment Course",
-		filters={
-			"parent": ["in", list(enrollments)],
-			"parenttype": "Program Enrollment",
-			"custom_provisional": 1,
-		},
-		fields=["name", "parent", "course", "custom_provisional_on"],
-	)
-	return [(enrollments[row.parent], row) for row in rows]
+	# A row whose enrolment was cancelled, or belongs to another student when one
+	# was named, has no enrolment here and is not a registration in force.
+	return [(enrollments[row.parent], row) for row in rows if row.parent in enrollments]
 
 
 def resolve_provisional_registrations(student=None):

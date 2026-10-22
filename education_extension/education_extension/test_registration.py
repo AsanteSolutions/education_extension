@@ -1216,7 +1216,7 @@ class TestCarryOversStayOptional(UnitTestCase):
 	def row(self, course_block, block, prereq_outcome):
 		history = {self.PREREQ: prereq_outcome}
 		rules = {self.COURSE: [(self.PREREQ, reg.PREREQUISITE)]}
-		return reg._row(self.COURSE, course_block, block, history, set(), rules, set())
+		return reg._row(self.COURSE, course_block, block, history, rules, set())
 
 	def test_a_carry_over_awaiting_a_result_is_still_a_carry_over(self):
 		"""The one that was wrong: the provisional branch was tested first, and
@@ -1281,7 +1281,7 @@ class TestAStudentIsNeverLockedOut(UnitTestCase):
 		candidates = {course: self.BLOCK for course in candidates}
 		return {
 			row["course"]: row
-			for row in reg.offered_rows(candidates, self.BLOCK, history, set(), rules, strict)
+			for row in reg.offered_rows(candidates, self.BLOCK, history, rules, strict)
 		}
 
 	def assert_submittable(self, rows, history, rules):

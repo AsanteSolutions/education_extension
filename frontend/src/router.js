@@ -78,7 +78,14 @@ router.beforeEach(async (to, from) => {
     if (user.data.length === 0) {
       await user.reload()
     }
-    await student.reload()
+    // Guarded like the line above it. This refetched the student on every
+    // navigation -- a round trip between each page, blocking the route -- to
+    // paper over pages that read the store once at setup and never looked
+    // again. Those pages hold refs and refetch when the store lands now, so
+    // the fetch belongs where it always did: once, when there is nothing yet.
+    if (!student.fetched) {
+      await student.reload()
+    }
   } catch (e) {
     console.error('Failed to load user/student data', e)
   }

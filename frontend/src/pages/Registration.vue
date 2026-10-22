@@ -388,7 +388,6 @@ const BADGES = {
 	blocked: { label: 'Blocked', theme: 'red' },
 	passed: { label: 'Passed', theme: 'green' },
 	awaiting_result: { label: 'Awaiting result', theme: 'gray' },
-	registered: { label: 'Registered', theme: 'green' },
 }
 const badge = (status) => BADGES[status] || { label: status, theme: 'gray' }
 

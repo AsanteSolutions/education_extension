@@ -135,10 +135,17 @@ def on_student_update(doc, method=None):
 	account's access and get none of their own.
 	"""
 	before = doc.get_doc_before_save()
-	if before and before.user == doc.user:
+	# An insert fires `after_insert` and then `on_update`, and there is no
+	# earlier version of a document that has just been created. Confining is the
+	# insert hook's job; without this the two hooks overlap and every new student
+	# is confined twice, the second time only to be told it was already done.
+	if not before:
 		return
 
-	if before and before.user:
+	if before.user == doc.user:
+		return
+
+	if before.user:
 		release(doc.name, before.user)
 	confine(doc.name, doc.user)
 

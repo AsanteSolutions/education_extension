@@ -416,12 +416,6 @@ class CourseMarkSheet(Document):
 		"""
 		from education_extension.education_extension.marking import review_rows
 
-		by_student = {}
-		for entry in self.entries:
-			by_student.setdefault(entry.student, [])
-		for row in self.marks():
-			by_student[row["student"]].append(row)
-
 		moderated = self.moderation_method in (MODERATION_LINEAR, MODERATION_FLAT)
 
 		if self.sitting == SUPPLEMENTARY:
@@ -448,6 +442,15 @@ class CourseMarkSheet(Document):
 			for row in rows:
 				row["aegrotat"] = sorted(sourced_here.get(row["student"], ()))
 			return {"mode": "aegrotat", "criteria": criteria, "rows": rows, "moderated": moderated}
+
+		# Built here rather than above: the two branches that have already
+		# returned do not read it, and the aegrotat one works out its own from
+		# the main sheet as well as this one. Assembling it up front meant
+		# walking every mark on the sheet before discarding the result, and
+		# calling `self.marks()` twice over on an aegrotat review.
+		by_student = {entry.student: [] for entry in self.entries}
+		for row in self.marks():
+			by_student[row["student"]].append(row)
 
 		return {
 			"mode": "main",
@@ -721,31 +724,24 @@ class CourseMarkSheet(Document):
 				)
 			)
 
-		enrolled = frappe.get_all(
-			"Program Enrollment",
-			fields=["name", "student"],
-			filters={"academic_term": self.academic_term, "docstatus": 1},
-			limit_page_length=0,
-		)
-		if not enrolled:
-			return []
-
-		# The course sits in the enrolment's child table, so the enrolments taking
-		# it have to be looked up before their students can be.
-		taking_the_course = set(
+		# The course sits in the enrolment's child table, so this joins rather than
+		# reading one side and then the other: every submitted enrolment in the
+		# term came back first, then went out again as an IN-list of a few hundred
+		# names, for each course in turn. `generate_sheets` does this once per
+		# course, around sixty times in a run.
+		return order_students(
 			frappe.get_all(
-				"Program Enrollment Course",
-				filters={
-					"parent": ["in", [row.name for row in enrolled]],
-					"parenttype": "Program Enrollment",
-					"course": self.course,
-				},
-				pluck="parent",
+				"Program Enrollment",
+				filters=[
+					["Program Enrollment", "academic_term", "=", self.academic_term],
+					["Program Enrollment", "docstatus", "=", 1],
+					["Program Enrollment Course", "course", "=", self.course],
+				],
+				pluck="student",
+				distinct=True,
 				limit_page_length=0,
 			)
 		)
-
-		return order_students({row.student for row in enrolled if row.name in taking_the_course})
 
 	# -- moderation ----------------------------------------------------------
 

@@ -69,7 +69,7 @@
                   v-for="calendarEvent in parsedData[parseDate(date)]"
                   :event="calendarEvent"
                   :date="date"
-                  class="mb-2 cursor-pointer w-full"
+                  class="mb-2 w-full"
                   :draggable="false"
                   :key="calendarEvent.name"
                 />

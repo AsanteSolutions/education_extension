@@ -25,50 +25,49 @@
   </div>
 </template>
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { studentStore } from '@/stores/student'
 
-import { Dialog, createResource, Dropdown, FeatherIcon } from 'frappe-ui'
-import { storeToRefs } from 'pinia'
+import { createResource, Dropdown, FeatherIcon } from 'frappe-ui'
 import Calendar from '@/components/Calendar.vue'
 
 const { getCurrentProgram, getStudentInfo, getStudentGroups } = studentStore()
-const programName = ref(getCurrentProgram().value?.program)
 
-let studentInfo = getStudentInfo().value
+// Held as refs rather than unwrapped once. The store replaces these when its
+// own request lands, which is usually after this page is set up, so reading
+// `.value` here pinned whatever happened to be there -- nothing.
+const currentProgram = getCurrentProgram()
+const studentInfo = getStudentInfo()
+const studentGroups = getStudentGroups()
+const programName = computed(() => currentProgram.value?.program)
 
-onMounted(() => {
-  setStudentGroup()
-})
+const NO_GROUP = 'Select Student Group'
+const selectedGroup = ref(NO_GROUP)
 
-const selectedGroup = ref('Select Student Group')
-const allStudentGroups = ref()
-function setStudentGroup() {
-  allStudentGroups.value = getStudentGroups().value
-  allStudentGroups.value.forEach(
-    (group) =>
-      (group.onClick = () => {
-        if (group.label === selectedGroup.value) return
-        selectedGroup.value = group.label
-	      attendanceResource.update({
-	        params: {
-	          student: studentInfo.name,
-	          student_group: selectedGroup.value,
-	        },
-	      })
-        attendanceResource.reload()
-      })
-  )
-  selectedGroup.value =
-    allStudentGroups.value[0].label || 'Select Student Group'
+const loadAttendance = () => {
+  if (!studentInfo.value?.name || selectedGroup.value === NO_GROUP) return
   attendanceResource.update({
     params: {
-      student: studentInfo.name,
+      student: studentInfo.value.name,
       student_group: selectedGroup.value,
     },
   })
   attendanceResource.reload()
 }
+
+// Built from the store rather than mutated in place, so the dropdown follows
+// the groups instead of being filled in once on mount and never again.
+const allStudentGroups = computed(() =>
+  (studentGroups.value || []).map((group) => ({
+    ...group,
+    onClick: () => {
+      if (group.label === selectedGroup.value) return
+      selectedGroup.value = group.label
+      loadAttendance()
+    },
+  })),
+)
+
 
 const attendanceStatus = {
   Present: 'bg-green-100',
@@ -78,10 +77,8 @@ const attendanceStatus = {
 
 const attendanceResource = createResource({
   url: 'education.education.api.get_student_attendance',
-  params: {
-    student: studentInfo.name,
-    student_group: selectedGroup.value,
-  },
+  // Params are set by `loadAttendance` once there is a student and a group to
+  // ask about; there is nothing to fetch before that.
   transform: (attendance) => {
     // filter attendance to remove duplicate attendance data
     attendance = attendance.filter(
@@ -106,5 +103,22 @@ const attendanceResource = createResource({
     console.log('Error', err)
   },
 })
+
+// Below the resource on purpose: `immediate` runs this during setup, and
+// `loadAttendance` reaches for `attendanceResource`, which is not initialised
+// until the statement above has run.
+watch(
+  allStudentGroups,
+  (groups) => {
+    // A student can legitimately belong to no group at all -- a new intake, or
+    // one not yet allocated. Reading `[0].label` threw on that, inside
+    // `onMounted`, which left the calendar permanently empty and took the
+    // dropdown down with it.
+    if (!groups.length || selectedGroup.value !== NO_GROUP) return
+    selectedGroup.value = groups[0].label || NO_GROUP
+    loadAttendance()
+  },
+  { immediate: true },
+)
 
 </script>

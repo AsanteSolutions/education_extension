@@ -24,6 +24,17 @@ PORTAL_STUDENT_FIELDS = [
 	"blood_group",
 	"gender",
 	"nationality",
+	# The address the profile panel has always tried to show. It read these six
+	# fields and this list sent none of them, so "Address:" rendered empty for
+	# everyone, and the payment dialog's country prefill was never filled in.
+	# A student's own address, sent to that student: the same footing as the
+	# date of birth and mobile number already here.
+	"address_line_1",
+	"address_line_2",
+	"city",
+	"state",
+	"pincode",
+	"country",
 ]
 
 

@@ -181,10 +181,56 @@ class TestOneAccountCannotStandForTwoStudents(IntegrationTestCase):
 		)
 
 
+class TestThePortalSendsWhatThePortalReads(IntegrationTestCase):
+	"""The profile panel can only show a field this list carries.
+
+	It read six address fields and the list sent none of them, so the panel's
+	"Address:" line was blank for everybody -- and the payment dialog, which
+	prefills its country from the same payload, never had one to prefill.
+	Nothing failed; the information simply was not there.
+	"""
+
+	# What `ProfileModal.vue` joins into its Address line.
+	ADDRESS_FIELDS = (
+		"address_line_1",
+		"address_line_2",
+		"city",
+		"state",
+		"pincode",
+		"country",
+	)
+
+	def setUp(self):
+		needs_doctype(self, "Student")
+
+	def test_the_address_the_profile_panel_shows_is_sent(self):
+		self.assertEqual(
+			[field for field in self.ADDRESS_FIELDS if field not in api.PORTAL_STUDENT_FIELDS],
+			[],
+			"the profile panel reads an address field the portal never sends",
+		)
+
+	def test_every_field_sent_is_one_the_student_record_has(self):
+		"""A name that has drifted sends nothing and says nothing about it."""
+		on_student = {field.fieldname for field in frappe.get_meta("Student").fields}
+		# `name` is the record's own id, not a field on it.
+		on_student.add("name")
+
+		self.assertEqual(
+			[field for field in api.PORTAL_STUDENT_FIELDS if field not in on_student],
+			[],
+			"the portal asks Student for a field it does not have",
+		)
+
+
 def run_tests(verbosity=2):
 	"""Run these from a console, since bench run-tests cannot bootstrap this site."""
 	suite = unittest.TestSuite()
 	loader = unittest.TestLoader()
-	for case in (TestWhoTheSessionBelongsTo, TestOneAccountCannotStandForTwoStudents):
+	for case in (
+		TestWhoTheSessionBelongsTo,
+		TestOneAccountCannotStandForTwoStudents,
+		TestThePortalSendsWhatThePortalReads,
+	):
 		suite.addTests(loader.loadTestsFromTestCase(case))
 	return unittest.TextTestRunner(verbosity=verbosity).run(suite)

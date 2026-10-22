@@ -87,10 +87,51 @@ const props = defineProps({
 })
 const emits = defineEmits(['update:modelValue', 'success'])
 
+const CHECKOUT_SRC = 'https://checkout.razorpay.com/v1/checkout.js'
+
+// One load for the life of the page, and something to wait on. This used to
+// append a fresh <script> on every mount -- a tag per dialog opened, none of
+// them ever removed -- and then reach for `Razorpay` as a bare global when the
+// pay button was pressed. If the script had not arrived, or an ad blocker or a
+// CSP had stopped it, that threw a ReferenceError inside a resource callback,
+// where nothing shows it: the button simply did nothing, every time, with no
+// message and no way for the student to tell why.
+let checkoutLoader = null
+
+function loadCheckout() {
+  if (window.Razorpay) return Promise.resolve(window.Razorpay)
+  if (checkoutLoader) return checkoutLoader
+
+  checkoutLoader = new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${CHECKOUT_SRC}"]`)
+    const script = existing || document.createElement('script')
+
+    script.addEventListener('load', () =>
+      window.Razorpay
+        ? resolve(window.Razorpay)
+        : reject(new Error('Razorpay checkout loaded but did not register')),
+    )
+    script.addEventListener('error', () => {
+      // Cleared so a later attempt can try again: the connection may be back,
+      // and a student left on a dead button has nothing else to try.
+      checkoutLoader = null
+      reject(new Error('Razorpay checkout could not be loaded'))
+    })
+
+    if (!existing) {
+      script.src = CHECKOUT_SRC
+      script.async = true
+      document.body.appendChild(script)
+    }
+  })
+
+  return checkoutLoader
+}
+
+// Started early so it is usually there by the time anyone presses pay, but
+// waited on below rather than assumed.
 onMounted(() => {
-  const script = document.createElement('script')
-  script.src = `https://checkout.razorpay.com/v1/checkout.js`
-  document.body.appendChild(script)
+  loadCheckout().catch(() => {})
 })
 
 const paymentOptions = createResource({
@@ -126,10 +167,18 @@ function openPaymentGateway(close) {
           handleSuccess(response, close)
         }
 
-        let rzp = new Razorpay(data)
-        rzp.open()
-        rzp.on('payment.failed', (response) => handleFailure(response))
-        rzp.on('payment.success', (response) => handleSuccess(response, close))
+        loadCheckout()
+          .then((Razorpay) => {
+            const rzp = new Razorpay(data)
+            rzp.open()
+            rzp.on('payment.failed', (response) => handleFailure(response))
+            rzp.on('payment.success', (response) =>
+              handleSuccess(response, close),
+            )
+          })
+          .catch((err) => {
+            showError(err, 'The payment window could not be opened.')
+          })
       },
       onError(err) {
         showError(err)
@@ -194,10 +243,13 @@ function handleFailure(response) {
   )
 }
 
-function showError(err) {
+function showError(err, message) {
   console.log(err)
   createToast({
-    message: 'Something went wrong',
+    // Said specifically where there is something specific to say. "Something
+    // went wrong" about a payment, with no detail, tells a student nothing
+    // about whether their money moved.
+    message: message || 'Something went wrong',
     icon: 'x',
     iconClasses: 'text-red-600',
   })

@@ -4,10 +4,12 @@
 		     own accord once the marks land. What stood here was a line of text
 		     naming one module, shown to everybody on every term.
 
-		     The reason comes with it where the academic office has recorded one,
-		     on a Course Results Notice. The page never invents one: the same
-		     absence in the data could be marking in progress, a paper never sat,
-		     or a module dropped after registering. -->
+		     Only modules the academic office has recorded a reason for, on a
+		     Course Results Notice. A module with no marks and no reason is not
+		     mentioned: the page cannot tell marking in progress from a paper
+		     never sat from a module dropped after registering, and saying so
+		     told the student nothing and sent them to an office that had not
+		     written anything down either. -->
 		<div
 			v-if="withoutResults.length"
 			class="flex items-start gap-2 border-b border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-800"
@@ -16,10 +18,7 @@
 			<div>
 				<div class="font-medium">No results have been recorded for:</div>
 				<div v-for="row in withoutResults" :key="row.course" class="mt-0.5">
-					{{ row.course }}<template v-if="row.reason"> — {{ row.reason }}</template>
-				</div>
-				<div v-if="anyWithoutAReason" class="mt-1 text-amber-700">
-					Ask the academic office if you were expecting one.
+					{{ row.course }} — {{ row.reason }}
 				</div>
 			</div>
 		</div>
@@ -146,17 +145,13 @@ const loadTerm = (academic_year, academic_term) => {
 
 const tableRows = computed(() => grades.data?.rows || [])
 
-// Modules this student is registered for that have no marks at all. Shown only
-// alongside a table, because that is the state the server works it out for:
-// before a term is released there is no table and nothing is late.
+// Modules this student is registered for that have no marks and that the
+// academic office has written a notice about. Shown only alongside a table,
+// because that is the state the server works it out for: before a term is
+// released there is no table and nothing is late.
 const withoutResults = computed(() =>
 	view.value.state === 'table' ? grades.data?.without_results || [] : [],
 )
-
-// The pointer to the office is for the ones nobody has explained. Showing it
-// under a notice that already gives the reason reads as though the reason were
-// not the answer.
-const anyWithoutAReason = computed(() => withoutResults.value.some((row) => !row.reason))
 
 const tableColumns = computed(() => {
 	const columns = [

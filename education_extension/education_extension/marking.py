@@ -837,7 +837,7 @@ def get_student_grades(academic_year, academic_term):
 		# The supplementary columns only appear when the student has something in
 		# them, which most do not.
 		"has_supplementary": bool(supplementary or supplementary_comments),
-		"without_results": _modules_with_nothing_recorded(
+		"without_results": _notices_for_missing_results(
 			student, academic_year, academic_term, by_course
 		),
 		"released": True,
@@ -845,8 +845,8 @@ def get_student_grades(academic_year, academic_term):
 	}
 
 
-def _modules_with_nothing_recorded(student, academic_year, academic_term, by_course):
-	"""Modules the student registered for that have no marks at all.
+def _notices_for_missing_results(student, academic_year, academic_term, by_course):
+	"""What the academic office has said about this student's unmarked modules.
 
 	The table is built from the marks, so a module with none has no row in it:
 	a student looking for a result they were expecting finds nothing, and
@@ -854,16 +854,16 @@ def _modules_with_nothing_recorded(student, academic_year, academic_term, by_cou
 	naming one module, hard-coded into the page, shown to every student on every
 	term and true only until somebody remembered to take it out.
 
-	Only reached once the term has been released -- before that there is no
-	table at all -- which is what makes this worth saying. A module with no
-	marks part-way through a term is marking in progress and not news; a module
-	with no marks when the results are out is the one a student will ask about.
+	A module is named here only where there is a Course Results Notice for it.
+	The absence on its own is not news a student can act on -- still being
+	marked, never sat, dropped after registering are the same absence in the
+	data, and the page cannot tell which -- so saying "no results, ask the
+	office" told a student nothing they did not already know and invited a call
+	the office could not answer either. Where the office has recorded the reason
+	there is something worth reading, and that is the only case this returns.
 
-	Each carries whatever the academic office has recorded about it, where they
-	have recorded anything. The reason is not knowable from here -- still being
-	marked, never sat, dropped after registering are the same absence in the data
-	-- so it is read from a Course Results Notice rather than guessed, and the
-	module is named on its own where there is none.
+	Only reached once the term has been released, so a module still being marked
+	part-way through a term says nothing by default.
 	"""
 	from education_extension.education_extension.doctype.course_results_notice.course_results_notice import (
 		notices_for,
@@ -874,7 +874,11 @@ def _modules_with_nothing_recorded(student, academic_year, academic_term, by_cou
 	courses = sorted(course for course in registered if course not in by_course)
 	notices = notices_for(academic_term, courses)
 
-	return [{"course": course, "reason": notices.get(course)} for course in courses]
+	return [
+		{"course": course, "reason": notices[course]}
+		for course in courses
+		if course in notices
+	]
 
 
 def _nothing_to_show(released, message):

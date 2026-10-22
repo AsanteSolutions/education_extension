@@ -435,6 +435,10 @@ class TestTheGradesPageNamesModulesWithNoResults(IntegrationTestCase):
 	saying why. The portal papered over that with a line of text naming one
 	module, hard-coded into the page, shown to every student on every term and
 	true only until somebody remembered to take it out.
+
+	What replaced it says something only where the academic office has: an
+	unexplained gap is not news a student can act on, and pointing them at an
+	office that has written nothing down helps neither of them.
 	"""
 
 	def setUp(self):
@@ -451,11 +455,11 @@ class TestTheGradesPageNamesModulesWithNoResults(IntegrationTestCase):
 
 	def without_results(self):
 		from education_extension.education_extension.marking import (
-			_modules_with_nothing_recorded,
+			_notices_for_missing_results,
 			get_assessment_results,
 		)
 
-		return _modules_with_nothing_recorded(
+		return _notices_for_missing_results(
 			self.case["student"],
 			self.case["academic_year"],
 			self.case["academic_term"],
@@ -465,67 +469,63 @@ class TestTheGradesPageNamesModulesWithNoResults(IntegrationTestCase):
 	def named(self):
 		return [row["course"] for row in self.without_results()]
 
-	def test_a_registered_module_with_no_marks_is_named(self):
+	def test_a_module_nobody_has_explained_is_not_named(self):
+		"""The absence on its own is not worth saying.
+
+		The page cannot tell marking in progress from a paper never sat from a
+		module dropped after registering -- they are one absence in the data --
+		so naming the module told the student only what the empty table already
+		had, and sent them to an office with nothing written down.
+		"""
+		self.assertNotIn(self.case["course"], self.named())
+
+	def test_a_module_the_office_has_explained_is_named(self):
+		needs_doctype(self, "Course Results Notice")
+		self.record_a_notice("Marking is still in progress.")
 		self.assertIn(self.case["course"], self.named())
 
-	def test_a_module_with_no_notice_carries_no_reason(self):
-		"""The page never invents one. The same absence in the data could be
-		marking in progress, a paper never sat, or a module dropped."""
-		row = next(r for r in self.without_results() if r["course"] == self.case["course"])
-		self.assertIsNone(row["reason"])
+	def record_a_notice(self, reason, disabled=0):
+		frappe.get_doc(
+			{
+				"doctype": "Course Results Notice",
+				"course": self.case["course"],
+				"academic_term": self.case["academic_term"],
+				"reason": reason,
+				"disabled": disabled,
+			}
+		).insert()
 
 	def test_what_the_academic_office_recorded_is_what_the_student_reads(self):
 		"""The reason the hard-coded line carried, with somewhere to live."""
 		needs_doctype(self, "Course Results Notice")
-		frappe.get_doc(
-			{
-				"doctype": "Course Results Notice",
-				"course": self.case["course"],
-				"academic_term": self.case["academic_term"],
-				"reason": "Marking is still in progress.",
-			}
-		).insert()
+		self.record_a_notice("Marking is still in progress.")
 
 		row = next(r for r in self.without_results() if r["course"] == self.case["course"])
 		self.assertEqual(row["reason"], "Marking is still in progress.")
 
-	def test_a_disabled_notice_is_not_shown(self):
+	def test_a_disabled_notice_takes_the_module_off_the_page(self):
+		"""Retiring a notice is how the office stops saying something, so the
+		module goes back to not being mentioned at all."""
 		needs_doctype(self, "Course Results Notice")
-		frappe.get_doc(
-			{
-				"doctype": "Course Results Notice",
-				"course": self.case["course"],
-				"academic_term": self.case["academic_term"],
-				"reason": "Retired, but kept on file.",
-				"disabled": 1,
-			}
-		).insert()
+		self.record_a_notice("Retired, but kept on file.", disabled=1)
 
-		row = next(r for r in self.without_results() if r["course"] == self.case["course"])
-		self.assertIsNone(row["reason"])
+		self.assertNotIn(self.case["course"], self.named())
 
 	def test_a_notice_stops_being_shown_once_the_marks_are_in(self):
 		"""The expiry, which is structural rather than a date: a notice is only
 		reached for a module the student has nothing recorded in, so forgetting
 		to delete one costs nothing."""
 		needs_doctype(self, "Course Results Notice")
-		frappe.get_doc(
-			{
-				"doctype": "Course Results Notice",
-				"course": self.case["course"],
-				"academic_term": self.case["academic_term"],
-				"reason": "Marking is still in progress.",
-			}
-		).insert()
+		self.record_a_notice("Marking is still in progress.")
 
 		# Stand in for the marks landing: the module leaves the list, and the
 		# notice goes with it rather than being read against a mark.
 		from education_extension.education_extension.marking import (
-			_modules_with_nothing_recorded,
+			_notices_for_missing_results,
 		)
 
 		as_if_marked = {self.case["course"]: [{"assessment_group": "Test 1"}]}
-		named = _modules_with_nothing_recorded(
+		named = _notices_for_missing_results(
 			self.case["student"],
 			self.case["academic_year"],
 			self.case["academic_term"],
@@ -563,6 +563,9 @@ class TestTheGradesPageNamesModulesWithNoResults(IntegrationTestCase):
 		silently take the notice away."""
 		from education_extension.education_extension.marking import get_student_grades
 
+		needs_doctype(self, "Course Results Notice")
+		self.record_a_notice("Marking is still in progress.")
+
 		user = frappe.db.get_value("Student", self.case["student"], "user")
 		if not user:
 			self.skipTest("that student has no portal account")
@@ -575,6 +578,22 @@ class TestTheGradesPageNamesModulesWithNoResults(IntegrationTestCase):
 			self.skipTest("that term is not released for this student")
 		self.assertIn("without_results", payload)
 		self.assertIn(self.case["course"], [r["course"] for r in payload["without_results"]])
+
+	def test_the_payload_carries_nothing_for_a_gap_nobody_explained(self):
+		"""The other half: no notice, nothing sent, so the page shows no banner."""
+		from education_extension.education_extension.marking import get_student_grades
+
+		user = frappe.db.get_value("Student", self.case["student"], "user")
+		if not user:
+			self.skipTest("that student has no portal account")
+
+		frappe.set_user(user)
+		payload = get_student_grades(self.case["academic_year"], self.case["academic_term"])
+		frappe.set_user("Administrator")
+
+		if payload.get("message"):
+			self.skipTest("that term is not released for this student")
+		self.assertEqual(payload["without_results"], [])
 
 
 def a_student_missing_a_module():

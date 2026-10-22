@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import unittest
+from unittest import mock
 
 import frappe
 from frappe.tests import IntegrationTestCase
@@ -946,6 +947,44 @@ class TestFilingAndWithdrawingAComment(IntegrationTestCase):
 		self.assertIsNone(self.file(""))
 		self.assertEqual(self.submitted(), [], "a withdrawn comment is still on file")
 		self.assertEqual(frappe.db.get_value("Academic Remark", first, "docstatus"), 2)
+
+	def test_every_way_a_comment_settles_re_checks_the_provisional_registrations(self):
+		"""Filing, correcting and withdrawing all have to reach the sweep.
+
+		Filing submits a document and withdrawing cancels one, so the hook gets
+		those for free. Correcting writes straight to the field -- the record is
+		submitted and the field is not amendable -- and fires no document events at
+		all, so a module registered provisionally on this result stayed on until
+		the nightly sweep, or past the last date to register, after which there is
+		nothing useful left to do about it.
+		"""
+		sweep = (
+			"education_extension.education_extension.registration"
+			".resolve_provisional_registrations"
+		)
+		student = self.keys["student"]
+		queued = []
+
+		with mock.patch.object(
+			frappe, "enqueue", side_effect=lambda path, **kw: queued.append((path, kw.get("student")))
+		):
+			self.file(self.codes[0])
+			filed = list(queued)
+
+			# The path under test: a comment already on file, replaced.
+			self.file(self.codes[1])
+			corrected = queued[len(filed) :]
+
+			self.file("")
+			withdrawn = queued[len(filed) + len(corrected) :]
+
+		self.assertIn((sweep, student), filed, "filing a comment did not queue the re-check")
+		self.assertIn(
+			(sweep, student), corrected, "correcting a comment did not queue the re-check"
+		)
+		self.assertIn(
+			(sweep, student), withdrawn, "withdrawing a comment did not queue the re-check"
+		)
 
 	def test_the_judgement_itself_is_kept(self):
 		"""Cancelled, not blanked. What QA decided, and then took back, is part

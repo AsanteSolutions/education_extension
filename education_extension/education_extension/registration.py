@@ -1263,9 +1263,21 @@ def _tell_student(enrollment, subject, message):
 
 def on_remark_change(doc, method=None):
 	"""Re-check this student provisional registrations when a result settles."""
+	recheck_provisional_registrations(doc.student)
+
+
+def recheck_provisional_registrations(student):
+	"""Queue the provisional re-check for one student.
+
+	Named apart from the document event because not every way a remark settles is
+	a document event. Correcting a filed comment writes straight to the field --
+	the field is not amendable after submission, so there is no document to save
+	-- and that path fires nothing at all. Both ways in call this, so neither can
+	be the one that forgets.
+	"""
 	frappe.enqueue(
 		"education_extension.education_extension.registration.resolve_provisional_registrations",
-		student=doc.student,
+		student=student,
 		queue="short",
 		enqueue_after_commit=True,
 	)

@@ -578,7 +578,22 @@ def set_course_remark(student, course, academic_year, academic_term, comment, su
 		frappe.get_doc(doctype, record.name).cancel()
 		return None
 
+	# Written straight to the field: the record is submitted and the field is not
+	# amendable, so there is no document save to make. That also means none of the
+	# document events fire -- including the one hooks.py registers on this exact
+	# doctype to take a provisional registration off a student once their result
+	# settles. The other three paths above submit or cancel a document and get it
+	# for free; this one has to ask.
+	#
+	# Without it a corrected comment waits for the nightly sweep, and one made
+	# after the last date to register arrives too late to act on at all.
 	frappe.db.set_value(doctype, record.name, fieldname, comment)
+
+	from education_extension.education_extension.registration import (
+		recheck_provisional_registrations,
+	)
+
+	recheck_provisional_registrations(student)
 	return record.name
 
 

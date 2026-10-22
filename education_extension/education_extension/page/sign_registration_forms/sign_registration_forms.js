@@ -119,17 +119,9 @@ class SigningQueue {
 		this.render_states()
 
 		// Open on the term being registered, the same one the reports default to.
-		frappe.db
-			.get_list('Registration Period', {
-				fields: ['academic_term'],
-				order_by: 'opens_on desc',
-				limit: 1,
-			})
-			.then((periods) => {
-				if (periods && periods.length) {
-					this.term_field.set_value(periods[0].academic_term)
-				}
-			})
+		education_extension.term_being_registered().then((term) => {
+			if (term) this.term_field.set_value(term)
+		})
 	}
 
 	render_states() {

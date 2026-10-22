@@ -33,26 +33,11 @@ frappe.query_reports['Registration Status'] = {
 		// starts from here rather than from a doctype they would have to know the
 		// name of. The term comes across with it; getting that wrong produces a
 		// permission that silently covers nothing.
-		report.page.add_inner_button(__('Allow a Student to Register'), () => {
-			frappe.new_doc('Registration Override', {
-				academic_term: report.get_filter_value('academic_term'),
-			});
-		});
+		education_extension.add_override_button(report);
 
 		// Default the term to whichever one has a registration period, so the
 		// report opens on the question being asked rather than empty.
-		if (report.get_filter_value('academic_term')) return;
-		frappe.db
-			.get_list('Registration Period', {
-				fields: ['academic_term'],
-				order_by: 'opens_on desc',
-				limit: 1,
-			})
-			.then((periods) => {
-				if (periods && periods.length) {
-					report.set_filter_value('academic_term', periods[0].academic_term);
-				}
-			});
+		education_extension.default_report_term(report);
 	},
 
 	// Colour carries the triage: who to chase, and what needs deciding.

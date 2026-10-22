@@ -26,26 +26,11 @@ frappe.query_reports['Academic Exclusions'] = {
 		// way to act on it is here rather than on a doctype nobody knows the name
 		// of. The term comes across with it: a permission for the wrong term
 		// silently covers nothing.
-		report.page.add_inner_button(__('Allow a Student to Register'), () => {
-			frappe.new_doc('Registration Override', {
-				academic_term: report.get_filter_value('academic_term'),
-			});
-		});
+		education_extension.add_override_button(report);
 
 		// Default to the term being registered, which is the one the exclusion
 		// bites on.
-		if (report.get_filter_value('academic_term')) return;
-		frappe.db
-			.get_list('Registration Period', {
-				fields: ['academic_term'],
-				order_by: 'opens_on desc',
-				limit: 1,
-			})
-			.then((periods) => {
-				if (periods && periods.length) {
-					report.set_filter_value('academic_term', periods[0].academic_term);
-				}
-			});
+		education_extension.default_report_term(report);
 	},
 
 	// Colour carries the triage: who still needs a decision, and how bad each

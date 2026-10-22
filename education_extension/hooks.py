@@ -42,7 +42,13 @@ add_to_apps_screen = [
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/education_extension/css/education_extension.css"
-# app_include_js = "/assets/education_extension/js/education_extension.js"
+
+# The term default and the override button, which the registration reports, the
+# signing page and the override form all need to agree on. A plain file, not a
+# bundle: `/assets/education_extension` is a symlink to this app's public
+# directory and a path without `.bundle.` in it is served as written, so this
+# needs no build step to reach a site.
+app_include_js = ["/assets/education_extension/js/registration_desk.js"]
 
 # include js, css files in header of web template
 # web_include_css = "/assets/education_extension/css/education_extension.css"

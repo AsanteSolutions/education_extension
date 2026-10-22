@@ -21,15 +21,9 @@ frappe.ui.form.on('Registration Override', {
 })
 
 const set_current_term = (frm) => {
-	frappe.db
-		.get_list('Registration Period', {
-			fields: ['academic_term'],
-			order_by: 'opens_on desc',
-			limit: 1,
-		})
-		.then((periods) => {
-			if (periods && periods.length) frm.set_value('academic_term', periods[0].academic_term)
-		})
+	education_extension.term_being_registered().then((term) => {
+		if (term) frm.set_value('academic_term', term)
+	})
 }
 
 const show_standing = (frm) => {

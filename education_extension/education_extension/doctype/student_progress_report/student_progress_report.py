@@ -19,10 +19,10 @@ QUALIFICATION_ID = "90911"
 # the regular marks, mirroring the portal Grades page.
 SUPP_GROUP = "Supplementary Exam"
 
-# Aegrotat (illness/absence) sittings are recorded by prefixing the normal exam
-# assessment group with AEGRO, e.g. "AEGRO Theory Exam". Any such result in the
-# term's marks moves the report onto the AEGROTAT issue date.
-AEGROTAT_GROUP_PREFIX = "AEGRO"
+# An aegrotat (illness/absence) sitting moves the report onto the AEGROTAT issue
+# date. What counts as one is `marking.sitting_of`'s to say — it reads both the
+# sitting on the mark and the older AEGRO-prefixed group name, and a second
+# opinion here is how this came to recognise only the latter.
 
 # The "Issue Date For" options on Progress Report Issue Date. Standard is a normal
 # marks run; the rest apply on top of it when the report carries a supplementary
@@ -404,20 +404,30 @@ def get_supplementary_remarks(doc):
 
 
 def _has_aegrotat_result(doc):
-	"""True when the term's marks include an aegrotat (illness/absence) sitting,
-	i.e. a result in an AEGRO-prefixed exam group."""
-	return bool(
-		frappe.get_all(
-			"Assessment Result",
-			filters={
-				"student": doc.student,
-				"academic_term": doc.academic_term,
-				"assessment_group": ["like", AEGROTAT_GROUP_PREFIX + "%"],
-				"docstatus": 1,
-			},
-			limit=1,
-		)
+	"""True when the term's marks include an aegrotat (illness/absence) sitting.
+
+	Read through `marking` for the same two reasons `get_supplementary_results`
+	is. An approved Course Mark Sheet is the record for the marks it carries and
+	is not an Assessment Result, so querying that doctype alone missed an
+	aegrotat marked on a sheet entirely. And the sitting is a field on the mark
+	now; the AEGRO-prefixed group name is the convention it replaced. Matching
+	only the name missed every aegrotat recorded the way the form asks for it,
+	and the report came out on the Standard issue date.
+
+	`sitting_of` is what reconciles the two, so this asks it rather than asking
+	again here and getting a third answer.
+	"""
+	from education_extension.education_extension.marking import (
+		AEGROTAT,
+		get_assessment_results,
+		sitting_of,
 	)
+
+	for results in get_assessment_results(doc.student, doc.academic_term).values():
+		if any(sitting_of(result)[1] == AEGROTAT for result in results):
+			return True
+
+	return False
 
 
 def _has_remarked_result(doc):
@@ -425,7 +435,12 @@ def _has_remarked_result(doc):
 
 	A Mark Change says so outright. Before that document existed the only trace
 	was an amendment — correcting a submitted document in Frappe means cancelling
-	and amending it — so both still count."""
+	and amending it — so both still count.
+
+	The same three doctypes `_last_marks_change` reads, and for the same reason:
+	a supplementary comment that was amended is a remarked result exactly as a
+	main one is, and leaving it out dated the report as though it had never been
+	looked at again."""
 	from education_extension.education_extension.doctype.mark_change.mark_change import (
 		has_remark_changes,
 	)
@@ -433,7 +448,7 @@ def _has_remarked_result(doc):
 	if has_remark_changes(doc.student, doc.academic_term):
 		return True
 
-	for doctype in ("Assessment Result", "Academic Remark"):
+	for doctype in ("Assessment Result", "Academic Remark", "Supplementary Academic Remark"):
 		if frappe.get_all(
 			doctype,
 			filters={

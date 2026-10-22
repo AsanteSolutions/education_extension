@@ -60,10 +60,16 @@ def execute():
 	# Aegrotat papers move onto the assessment they replace. Done row by row
 	# because the group each one lands on depends on its own name, and there are
 	# few enough of them that a statement per row costs nothing.
+	# Narrowed in the database first. The regex is still what decides -- it is
+	# the same one the app reads these names with -- but asking it to sift the
+	# entire mark history, every result ever recorded, to find the few papers
+	# named this way is work the index can do. `AEGRO%` is exactly the prefix
+	# the pattern anchors on, so nothing it would have matched is excluded.
 	aegrotat = [
 		row
 		for row in frappe.get_all(
 			"Assessment Result",
+			filters={"assessment_group": ["like", "AEGRO%"]},
 			fields=["name", "assessment_group"],
 			limit_page_length=0,
 		)

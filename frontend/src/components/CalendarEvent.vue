@@ -2,7 +2,7 @@
   <Popover placement="right" v-if="!event.status">
     <template #target="{ togglePopover }">
       <div
-        class="w-full p-2 rounded-lg"
+        class="w-full p-2 rounded-lg cursor-pointer"
         :class="colorMap[event?.color]?.background_color || 'bg-green-100'"
         @click="togglePopover"
       >
@@ -68,11 +68,18 @@
       </div>
     </template>
   </Popover>
+  <!--
+    An attendance chip. No popover: its whole content is the status, which is
+    already on the face of it. The click handler this used to carry named
+    `togglePopover`, a slot prop of the Popover above and out of scope here, so
+    it bound to nothing -- the chip was never clickable, and the pointer cursor
+    the calendar put on every event said otherwise. The cursor moved to the
+    branch that does open something.
+  -->
   <div
     v-else
     class="w-full p-2 rounded-md"
     :class="event.background_color || 'bg-green-100'"
-    @click="togglePopover"
   >
     <div class="flex gap-3 relative px-2 items-start">
       <FeatherIcon name="circle" class="h-4 text-black" />

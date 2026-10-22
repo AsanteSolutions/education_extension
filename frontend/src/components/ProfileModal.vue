@@ -69,39 +69,45 @@
 
 <script setup>
 import { Dialog, Avatar, FeatherIcon } from 'frappe-ui'
-import { inject } from 'vue'
+import { computed, inject } from 'vue'
 import { studentStore } from '@/stores/student'
 const { getStudentInfo } = studentStore()
 
 const showProfileDialog = inject('showProfileDialog')
 
-const studentInfo = getStudentInfo().value
+// Held as a ref and read through a computed. The store replaces this object
+// when its own request lands, which is almost always after this component is
+// set up -- so unwrapping `.value` here and building `infoFormat` from it once
+// pinned an empty object, and the panel had nothing to show however long it
+// stayed open.
+const student = getStudentInfo()
+const studentInfo = computed(() => student.value || {})
 
-const infoFormat = [
+const infoFormat = computed(() => [
   {
     section: 'section 1',
     fields: [
       {
         label: 'Mobile Number',
-        value: studentInfo.student_mobile_number,
+        value: studentInfo.value.student_mobile_number,
       },
       {
         label: 'Joining Date',
-        value: studentInfo.joining_date,
+        value: studentInfo.value.joining_date,
       },
       {
         label: 'Date of Birth',
-        value: studentInfo.date_of_birth,
+        value: studentInfo.value.date_of_birth,
       },
       {
         label: 'Address',
         value: [
-          studentInfo?.address_line_1,
-          studentInfo?.address_line_2,
-          studentInfo?.city,
-          studentInfo?.pincode,
-          studentInfo?.state,
-          studentInfo?.country,
+          studentInfo.value?.address_line_1,
+          studentInfo.value?.address_line_2,
+          studentInfo.value?.city,
+          studentInfo.value?.pincode,
+          studentInfo.value?.state,
+          studentInfo.value?.country,
         ]
           .map((item) => item?.trim())
           .filter(Boolean)
@@ -114,17 +120,17 @@ const infoFormat = [
     fields: [
       {
         label: 'Blood Group',
-        value: studentInfo.blood_group,
+        value: studentInfo.value.blood_group,
       },
       {
         label: 'Gender',
-        value: studentInfo.gender,
+        value: studentInfo.value.gender,
       },
       {
         label: 'Nationality',
-        value: studentInfo.nationality,
+        value: studentInfo.value.nationality,
       },
     ],
   },
-]
+])
 </script>

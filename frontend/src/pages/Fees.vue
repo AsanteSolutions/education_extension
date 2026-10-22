@@ -65,7 +65,7 @@
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import {
   ListView,
   ListHeader,
@@ -81,30 +81,51 @@ import MissingData from '@/components/MissingData.vue'
 import { createToast } from '@/utils'
 
 const { getStudentInfo } = studentStore()
-let studentInfo = getStudentInfo().value
+
+// Held as a ref. The store replaces this when its own request lands, usually
+// after this page is set up, so reading `.value` once pinned an empty object
+// and the invoice request went out naming no student at all.
+const studentInfo = getStudentInfo()
+const student = computed(() => studentInfo.value?.name)
+
+// What the student should deal with first. Every status the page can show is
+// named, "Partly Paid" included -- it was missing here while `badgeColor`
+// handled it, so it scored `undefined` and the comparator returned NaN. A
+// comparator that answers NaN, or nothing at all for two equal rows, is not a
+// comparator: the ordering it produces is whatever the engine's sort happens
+// to do with it. Anything unrecognised sorts last rather than scoring NaN, and
+// equal statuses fall back to the due date so the order is at least stable.
+const STATUS_ORDER = { Overdue: 0, Unpaid: 1, 'Partly Paid': 2, Paid: 3 }
+
+const byUrgency = (a, b) => {
+  const rank = (status) =>
+    status in STATUS_ORDER ? STATUS_ORDER[status] : Object.keys(STATUS_ORDER).length
+
+  const difference = rank(a.status) - rank(b.status)
+  if (difference) return difference
+
+  return String(a.due_date || '').localeCompare(String(b.due_date || ''))
+}
 
 const feesResource = createResource({
   url: 'education.education.api.get_student_invoices',
-  params: {
-    student: studentInfo.name,
-  },
+  // Fetched from the watch below, once there is a student to ask about.
+  auto: false,
   onSuccess: (response) => {
     printFormat = response?.print_format
-    let invoices = response?.invoices
-    invoices = invoices.sort((a, b) => {
-      const statusOrder = { Overdue: 0, Unpaid: 1, Paid: 2 }
-
-      const statusA = statusOrder[a.status]
-      const statusB = statusOrder[b.status]
-
-      if (statusA !== statusB) {
-        return statusA - statusB
-      }
-    })
-    tableData.rows = invoices
+    tableData.rows = [...(response?.invoices || [])].sort(byUrgency)
   },
-  auto: true,
 })
+
+watch(
+  student,
+  (name) => {
+    if (!name) return
+    feesResource.update({ params: { student: name } })
+    feesResource.reload()
+  },
+  { immediate: true },
+)
 
 const tableData = reactive({
   rows: [],

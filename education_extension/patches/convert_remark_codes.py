@@ -78,6 +78,7 @@ FIELDS = (
 
 def execute():
 	converted = 0
+	blank = 0
 	unresolved = {}
 
 	for doctype, fieldname in FIELDS:
@@ -91,6 +92,15 @@ def execute():
 
 		for row in frappe.get_all(doctype, fields=["name", fieldname]):
 			stored = row.get(fieldname)
+
+			# A row with no comment on it is not an unrecognised comment. Counting
+			# the blanks as unresolved put "N rows hold None" at the top of the
+			# report -- sorted by count, so it buried the handful of genuinely
+			# ambiguous values the report exists to surface.
+			if not (stored or "").strip():
+				blank += 1
+				continue
+
 			code = resolve(stored)
 
 			if code is None:
@@ -108,6 +118,8 @@ def execute():
 		frappe.db.commit()
 
 	print("Converted {0} remark values to legend codes".format(converted))
+	if blank:
+		print("  {0} row(s) carry no comment at all -- nothing to convert".format(blank))
 
 	for (doctype, stored), count in sorted(unresolved.items(), key=lambda item: -item[1]):
 		print(

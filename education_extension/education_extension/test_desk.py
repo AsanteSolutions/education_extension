@@ -191,10 +191,42 @@ class TestCopyOntoEducation(IntegrationTestCase):
 			start, end = bounds
 			present = {rows[i].link_to for i in range(start + 1, end)}
 			self.assertEqual(
-				{target for target, _kind in links} - present,
+				{row[0] for row in links} - present,
 				set(),
 				"card {0} is missing links".format(label),
 			)
+
+	def test_the_links_keep_the_labels_this_app_gave_them(self):
+		"""The page says "Sign Registration Forms", not `sign-registration-forms`.
+
+		The copy used to drop the label and fall back on the link target, which
+		reads as the doctype's own name for a DocType and as a raw slug for a
+		Page or a Report. The test beside this one compares only `link_to`, so
+		nothing caught it.
+		"""
+		self.addCleanup(frappe.db.rollback)
+
+		# Run the copy, then look at what it left: a site copied before labels
+		# were carried across still holds the old ones until the next migrate,
+		# and it is the migrate's result being asserted here.
+		desk.add_to_education_workspace()
+		rows = sorted(frappe.get_doc("Workspace", desk.TARGET).links, key=lambda r: r.idx or 0)
+
+		for label, _icon, links in desk._cards():
+			bounds = desk._group_bounds(rows, label, "Card Break")
+			if bounds is None:
+				continue
+			start, end = bounds
+			placed = {rows[i].link_to: rows[i].label for i in range(start + 1, end)}
+			for target, _kind, wanted in links:
+				if target in placed:
+					self.assertEqual(
+						placed[target],
+						wanted,
+						"{0} is labelled {1!r} here and {2!r} on our own page".format(
+							target, placed[target], wanted
+						),
+					)
 
 	def test_our_cards_hold_nothing_but_their_own_links(self):
 		"""The other half of the previous test, and the half that catches a bad
@@ -216,7 +248,7 @@ class TestCopyOntoEducation(IntegrationTestCase):
 			start, end = bounds
 			inside = {rows[i].link_to for i in range(start + 1, end)}
 			self.assertEqual(
-				inside - {target for target, _kind in links},
+				inside - {row[0] for row in links},
 				set(),
 				"the {0} card picked up a link that is not its own".format(label),
 			)
@@ -232,7 +264,16 @@ class TestCopyOntoEducation(IntegrationTestCase):
 			self.assertEqual(len(set(idxs)), len(idxs), "{0} has duplicate idx".format(doctype))
 
 	def test_copying_again_changes_nothing(self):
-		"""It runs on every migrate, so a second run has to be a no-op."""
+		"""It runs on every migrate, so a second run has to be a no-op.
+
+		The baseline is taken after one run, not before it. A site can have work
+		outstanding -- labels copied before the label was carried across, say --
+		and settling that on the next migrate is the point of the hook. What must
+		not happen is a run that keeps finding something to do for ever.
+		"""
+		self.addCleanup(frappe.db.rollback)
+
+		desk.add_to_education_workspace()
 		before = self._snapshot()
 		desk.add_to_education_workspace()
 		self.assertEqual(self._snapshot(), before)
@@ -267,7 +308,9 @@ class TestCopyOntoEducation(IntegrationTestCase):
 
 			# Forces a save: with nothing to add, `_add_cards` returns early and
 			# the dangling row is never put in front of the validator at all.
-			desk._add_cards([("Dangling Row Test", "folder", [("Student", "DocType")])])
+			desk._add_cards(
+				[("Dangling Row Test", "folder", [("Student", "DocType", "Student")])]
+			)
 
 	def test_a_link_under_two_cards_is_added_to_the_sidebar_once(self):
 		"""`linked` is read once, so it has to be kept up to date as rows go in.
@@ -295,8 +338,8 @@ class TestCopyOntoEducation(IntegrationTestCase):
 
 			desk._add_sidebar_items(
 				[
-					("Twice Listed A", "folder", [(target, "DocType")]),
-					("Twice Listed B", "folder", [(target, "DocType")]),
+					("Twice Listed A", "folder", [(target, "DocType", target)]),
+					("Twice Listed B", "folder", [(target, "DocType", target)]),
 				],
 				desk.TARGET,
 			)

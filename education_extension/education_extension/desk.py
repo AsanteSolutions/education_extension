@@ -146,15 +146,14 @@ def add_to_education_workspace():
 		return
 
 	with _without_writing_to_the_source_tree():
-		added_links = _add_cards(cards)
+		added_links, added_blocks = _add_cards(cards)
 		added_items = _add_sidebar_items(cards)
 
-	if added_links or added_items:
+	if added_links or added_blocks or added_items:
 		frappe.clear_cache()
 		print(
-			"Education Extension: added {0} workspace links and {1} sidebar items".format(
-				added_links, added_items
-			)
+			"Education Extension: added {0} workspace links, {1} cards and "
+			"{2} sidebar items".format(added_links, added_blocks, added_items)
 		)
 
 
@@ -173,7 +172,12 @@ def _cards():
 		if row.type == "Card Break":
 			cards.append((row.label, row.icon, []))
 		elif row.type == "Link" and cards and row.link_to:
-			cards[-1][2].append((row.link_to, row.link_type))
+			# The label travels with the link. Dropping it left the copy to fall
+			# back on the link target, which reads as the doctype's name for a
+			# DocType and as a raw slug for anything else: the Education page
+			# carried `sign-registration-forms` where this page says "Sign
+			# Registration Forms".
+			cards[-1][2].append((row.link_to, row.link_type, row.label or row.link_to))
 
 	return [card for card in cards if card[2]]
 
@@ -229,11 +233,9 @@ def _insert(doc, table, position, values):
 	group. Appending it to the end of the table would file it under whichever
 	group happens to be last.
 	"""
-	row = doc.append(table, values)
-	rows = doc.get(table)
-	rows.remove(row)
-	rows.insert(position, row)
-	return row
+	# `append` takes the position itself and renumbers the table when given one.
+	# This used to append, pull the row back out and splice it in by hand.
+	return doc.append(table, values, position)
 
 
 def _resequence(rows):
@@ -275,7 +277,7 @@ def _add_cards(cards):
 	added = blocks = 0
 
 	for label, icon, links in cards:
-		wanted = [(target, kind) for target, kind in links if _exists(target, kind)]
+		wanted = [row for row in links if _exists(row[0], row[1])]
 		added += _place_card(workspace, label, icon, wanted)
 		if not (wanted or _group_bounds(workspace.links, label, "Card Break")):
 			# Nothing in the card is installed on this site, so there is no card.
@@ -295,7 +297,7 @@ def _add_cards(cards):
 			blocks += 1
 
 	if not (added or blocks):
-		return 0
+		return 0, 0
 
 	_resequence(workspace.links)
 	workspace.content = json.dumps(content)
@@ -310,7 +312,10 @@ def _add_cards(cards):
 	# them are what this covers.
 	workspace.flags.ignore_links = True
 	workspace.save()
-	return added or blocks
+	# Both counts, separately. `added or blocks` reported a count of content
+	# blocks as though it were a count of links whenever no link was added, so
+	# the migrate said it had added links it had not.
+	return added, blocks
 
 
 def _repair_missing_type(workspace):
@@ -367,9 +372,10 @@ def _place_card(workspace, label, icon, wanted):
 			rows[start].icon = icon
 			added += 1
 
-	present = {rows[i].link_to for i in range(start + 1, end)}
-	for target, kind in wanted:
+	present = {rows[i].link_to: rows[i] for i in range(start + 1, end)}
+	for target, kind, label_for in wanted:
 		if target in present:
+			added += _relabel(present[target], label_for)
 			continue
 		_insert(
 			workspace,
@@ -377,7 +383,7 @@ def _place_card(workspace, label, icon, wanted):
 			end,
 			{
 				"type": "Link",
-				"label": target,
+				"label": label_for,
 				"link_type": kind,
 				"link_to": target,
 				# Script and Query reports both route through query-report.
@@ -389,6 +395,19 @@ def _place_card(workspace, label, icon, wanted):
 
 	rows[start].link_count = end - start - 1
 	return added
+
+
+def _relabel(row, label_for):
+	"""Put the right label on a row copied before labels were carried across.
+
+	Only where the row is still carrying the link target as its label, which is
+	what the copy used to leave behind. A label somebody has since edited by
+	hand is theirs, and this is not the place to overrule it.
+	"""
+	if row.label == label_for or row.label != row.link_to:
+		return 0
+	row.label = label_for
+	return 1
 
 
 def _block_id(label):
@@ -411,15 +430,13 @@ def _add_sidebar_items(cards, name=TARGET):
 
 	for label, icon, links in cards:
 		wanted = [
-			(target, kind)
-			for target, kind in links
-			if _exists(target, kind) and target not in linked
+			row for row in links if _exists(row[0], row[1]) and row[0] not in linked
 		]
 		# Counted as linked straight away, not on the next read of the sidebar.
 		# A target listed under two cards on the source page would otherwise pass
 		# this test twice and be written in twice -- `_place_card` keeps its own
 		# per-card set for the same reason.
-		linked.update(target for target, _kind in wanted)
+		linked.update(row[0] for row in wanted)
 		added += _place_section(sidebar, label, icon, wanted)
 
 	if not added:
@@ -512,14 +529,14 @@ def _place_section(sidebar, label, icon, wanted):
 			added += 1
 		end = bounds[1]
 
-	for target, kind in wanted:
+	for target, kind, label_for in wanted:
 		_insert(
 			sidebar,
 			"items",
 			end,
 			{
 				"type": "Link",
-				"label": target,
+				"label": label_for,
 				"link_type": kind,
 				"link_to": target,
 				"child": 1,

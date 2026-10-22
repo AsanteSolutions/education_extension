@@ -16,6 +16,7 @@ import re
 
 import frappe
 from frappe import _
+from frappe.utils import sbool
 
 from education_extension.education_extension.doctype.course_mark_scheme.course_mark_scheme import (
 	COURSEWORK,
@@ -343,12 +344,6 @@ def _merge_sheet_marks(stored, from_sheet):
 	return stored
 
 
-# A missed coursework assessment scores nothing, because there is no re-sitting
-# for one — only exams are sat again. A missed exam is left out entirely, so the
-# course stays incomplete until an aegrotat paper answers for it.
-COURSEWORK_COMPONENT = "Coursework"
-
-
 def _sheet_mark_rows(condition, params):
 	"""Marks from approved Course Mark Sheets, with absences resolved.
 
@@ -380,7 +375,11 @@ def _sheet_mark(row):
 	if row.status == "Marked":
 		moderated = row.moderation_method in ("Linear Scale", "Flat Adjustment")
 		return row.moderated_score if moderated else row.raw_score
-	return 0 if row.component == COURSEWORK_COMPONENT else None
+	# A missed coursework assessment scores nothing, because there is no
+	# re-sitting for one -- only exams are sat again. A missed exam is left out
+	# entirely, so the course stays incomplete until an aegrotat paper answers
+	# for it.
+	return 0 if row.component == COURSEWORK else None
 
 
 def get_sheet_marks(student, academic_term):
@@ -488,7 +487,9 @@ def remark_codes(doctype="Academic Remark"):
 @frappe.whitelist()
 def get_remark_codes(supplementary=0):
 	"""So the QA view offers the same list the report legend explains."""
-	supplementary = frappe.parse_json(supplementary) if isinstance(supplementary, str) else supplementary
+	# `sbool`, not `parse_json`: this arrives from a request, and an unticked box
+	# can reach here as an empty string, which `parse_json` raises on.
+	supplementary = sbool(supplementary)
 	return remark_codes("Supplementary Academic Remark" if supplementary else "Academic Remark")
 
 
@@ -511,7 +512,7 @@ def set_course_remark(student, course, academic_year, academic_term, comment, su
 	"""
 	frappe.only_for(("Academics User", "Education Manager", "System Manager"))
 
-	supplementary = frappe.parse_json(supplementary) if isinstance(supplementary, str) else supplementary
+	supplementary = sbool(supplementary)
 	doctype = "Supplementary Academic Remark" if supplementary else "Academic Remark"
 	fieldname = "supp_remark" if supplementary else "remark"
 

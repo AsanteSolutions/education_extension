@@ -7,14 +7,26 @@ from frappe.model.document import Document
 from frappe.utils import now_datetime
 
 from education_extension.education_extension.doctype.student_progress_report.student_progress_report import (
+	SUPP_GROUP as SUPPLEMENTARY_GROUP,
 	round_half_up,
 )
 
 from education_extension.education_extension.doctype.course_mark_scheme.course_mark_scheme import (
+	COURSEWORK,
 	get_scheme,
 )
 from education_extension.education_extension.doctype.marking_settings.marking_settings import (
 	order_students,
+)
+
+# The sittings a sheet can cover: the course as everyone sits it, and the two
+# re-sittings. Taken from `marking`, which is where `sitting_of` decides what a
+# mark counts towards -- a second spelling here is a second answer waiting to
+# disagree with it.
+from education_extension.education_extension.marking import (
+	AEGROTAT,
+	MAIN,
+	SUPPLEMENTARY,
 )
 
 # The states the sheet moves through. Defined here as well as in the Workflow so
@@ -50,27 +62,11 @@ NOT_MARKED = "Not Marked"
 MARKED = "Marked"
 ABSENT = "Absent"
 
-# The sittings a sheet can cover. Main is the course as everyone sits it; the
-# other two are re-sittings, and each is opened for a different reason and so
-# for a different set of students.
-MAIN = "Main"
-SUPPLEMENTARY = "Supplementary"
-AEGROTAT = "Aegrotat"
-
-# A supplementary is one paper covering the course, not a re-sit of each
-# assessment, which is why it is reported in a column of its own.
-SUPPLEMENTARY_GROUP = "Supplementary Exam"
-
 # Who is entitled to a re-sitting: QA says so with a comment. Being absent is
 # not enough on its own — an aegrotat needs documentation, and it is QA who has
 # seen it.
 SUPPLEMENTARY_COMMENT = "SUPP"
 AEGROTAT_COMMENT = "AEGRO"
-
-# Only exams are sat again. A missed test or assignment scores nothing, because
-# there is no second chance at one.
-COURSEWORK = "Coursework"
-
 
 def entry_key(student, assessment_group):
 	"""Identifies a cell on the sheet.

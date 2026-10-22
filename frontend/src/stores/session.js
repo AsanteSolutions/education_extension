@@ -1,14 +1,8 @@
 import { defineStore } from 'pinia'
 import { createResource } from 'frappe-ui'
-import { usersStore } from '@/stores/user'
-import router from '@/router'
 import { ref, computed } from 'vue'
-import { studentStore } from '@/stores/student'
 
 export const sessionStore = defineStore('education-session', () => {
-  const { user: currentUser } = usersStore()
-  const { student } = studentStore()
-
   function sessionUser() {
     let cookies = new URLSearchParams(document.cookie.split('; ').join('&'))
     let _sessionUser = cookies.get('user_id')
@@ -20,20 +14,13 @@ export const sessionStore = defineStore('education-session', () => {
 
   let user = ref(sessionUser())
   const isLoggedIn = computed(() => !!user.value)
-  const login = createResource({
-    url: 'login',
-    onError() {
-      throw new Error('Invalid email or password')
-    },
-    onSuccess() {
-      currentUser.reload()
-      sessionUser.reload()
-      student.reload()
-      user.value = sessionUser()
-      login.reset()
-      router.replace({ path: '/' })
-    },
-  })
+
+  // Signing in is Frappe's own /login page, which is where `logout` below and
+  // the router's guard both send people. The resource that used to be here
+  // belonged to a Vue login form with no route to reach it, and could not have
+  // worked if there had been one: it called `sessionUser.reload()` on a plain
+  // function, and the page that submitted it imported an export this store
+  // does not have.
 
   const logout = createResource({
     url: 'logout',
@@ -46,7 +33,6 @@ export const sessionStore = defineStore('education-session', () => {
   return {
     user,
     isLoggedIn,
-    login,
     logout,
   }
 })

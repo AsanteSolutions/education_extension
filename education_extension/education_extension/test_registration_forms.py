@@ -123,10 +123,15 @@ class TestSigningRoles(UnitTestCase):
 
 	def test_the_queue_answers_to_the_registrar_roles(self):
 		"""These forms carry a student's name, ID number and modules. Whoever may
-		read them through the report may read them here and no one else."""
-		from education_extension.education_extension.dashboard import REGISTRAR_ROLES
+		read them through the report may read them here and no one else.
 
-		self.assertEqual(tuple(forms.REGISTRAR_ROLES), tuple(REGISTRAR_ROLES))
+		Asserted on the gate itself rather than on a copy of the role list: this
+		module used to re-implement `registrar_only` byte for byte beside the
+		roles it imported, which is a second thing to keep in step.
+		"""
+		from education_extension.education_extension import dashboard
+
+		self.assertIs(forms.registrar_only, dashboard.registrar_only)
 
 	def test_the_page_is_shown_to_the_same_people(self):
 		import json
@@ -141,7 +146,9 @@ class TestSigningRoles(UnitTestCase):
 		with open(path) as handle:
 			roles = {row["role"] for row in json.load(handle)["roles"]}
 
-		self.assertEqual(roles, set(forms.REGISTRAR_ROLES))
+		from education_extension.education_extension.dashboard import REGISTRAR_ROLES
+
+		self.assertEqual(roles, set(REGISTRAR_ROLES))
 
 
 class TestSigningForms(IntegrationTestCase):

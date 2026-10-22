@@ -18,8 +18,11 @@ import re
 import frappe
 from frappe.custom.doctype.custom_field.custom_field import create_custom_field
 
+from education_extension.education_extension.doctype.student_progress_report.student_progress_report import (
+	SUPP_GROUP,
+)
+
 AEGROTAT_PREFIX = re.compile(r"^AEGRO(?:TAT)?[\s_-]*", re.IGNORECASE)
-SUPP_GROUP = "Supplementary Exam"
 
 
 def execute():

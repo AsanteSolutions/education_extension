@@ -9,6 +9,7 @@
     "copy-html-entry": "cp ../education_extension/public/frontend/index.html ../education_extension/www/student-portal.html"
   },
   "dependencies": {
+    "@vueuse/core": "^10.8.0",
     "dayjs": "^1.11.10",
     "feather-icons": "^4.28.0",
     "frappe-ui": "^0.1.17",

@@ -36,10 +36,17 @@ from education_extension.education_extension.report.registration_status import (
 	registration_status as status,
 )
 
-RULE_IS_OFF = _(
-	"No academic standing rule is switched on, so nobody is excluded. Turn it on "
-	"in Registration Settings, where the thresholds are."
-)
+def rule_is_off():
+	"""Translated when it is read, not when the module is imported.
+
+	A worker imports this once and serves every user from it, so a string
+	translated at import is frozen in whichever language that worker started in.
+	Every other string in this file is translated inside a function.
+	"""
+	return _(
+		"No academic standing rule is switched on, so nobody is excluded. Turn it on "
+		"in Registration Settings, where the thresholds are."
+	)
 
 
 def execute(filters=None):
@@ -51,7 +58,7 @@ def execute(filters=None):
 	# rule to exclude anybody read exactly the same way otherwise, and they are
 	# very different things to report to a registrar.
 	if not rule():
-		return columns(), [], RULE_IS_OFF
+		return columns(), [], rule_is_off()
 
 	return columns(), rows(filters)
 

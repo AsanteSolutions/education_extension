@@ -12,10 +12,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { leaveStore } from '@/stores/leave'
 
 const router = useRouter()
 const currentRoute = computed(() => router.currentRoute.value.name)
-
-const { setIsAttendancePage } = leaveStore()
 </script>

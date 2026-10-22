@@ -33,14 +33,10 @@ from frappe.utils import now_datetime
 # the dashboard. Imported rather than repeated: which roles count as the
 # registrar is one decision, and this app already has more copies of that kind
 # of list than it should.
-from education_extension.education_extension.dashboard import REGISTRAR_ROLES
+from education_extension.education_extension.dashboard import registrar_only
 
 UNSIGNED = "unsigned"
 SIGNED = "signed"
-
-
-def registrar_only():
-	frappe.only_for(REGISTRAR_ROLES)
 
 
 @frappe.whitelist()
@@ -298,6 +294,12 @@ def sign_all(academic_term=None, names=None):
 
 	signed, problems = [], []
 	for consent in names:
+		# `frappe.throw` raises *and* pushes its message onto the log the response
+		# carries, so catching the exception is only half of not stopping here:
+		# every form deliberately skipped still popped its own error dialog, on
+		# top of the report collected below. The log is trimmed back to where it
+		# was, which leaves anything said before this call alone.
+		said_so_far = len(frappe.message_log)
 		try:
 			# Each on its own savepoint: one refusal should not undo the rest.
 			frappe.db.savepoint("sign_form")
@@ -305,6 +307,7 @@ def sign_all(academic_term=None, names=None):
 				signed.append(consent)
 		except frappe.ValidationError as error:
 			frappe.db.rollback(save_point="sign_form")
+			del frappe.message_log[said_so_far:]
 			problems.append({"consent": consent, "reason": str(error)})
 
 	return {"signed": signed, "problems": problems}

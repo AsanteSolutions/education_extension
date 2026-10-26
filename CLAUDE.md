@@ -30,8 +30,9 @@ for name in ["test_academic_standing", "test_api", "test_dashboard", "test_desk"
 ~331 tests, and they should all pass. Prefer this **plain-python runner over
 `bench console`**: the console runs each top-level statement as its own IPython
 cell, so a function or lambda defined in one cell cannot see names from another
-and you get spurious `NameError`s. If you do use the console, keep everything
-inside one statement or expect that trap.
+and you get spurious `NameError`s. Through the console, load the script with
+`exec(open(path).read(), globals())` — the explicit `globals()` is what stops
+that, and leaving it off is how the trap gets sprung.
 
 A doctype's own `test_*.py` under `doctype/<name>/` is where Frappe looks but
 never runs here; the runnable siblings live in `education_extension/`. If you
@@ -40,13 +41,17 @@ add a test class, add it to that module's `run_tests()` tuple or it never runs.
 `testing.py` has `needs_education_app(case)` and `needs_doctype(case, *names)`
 for skipping where a site lacks the fixtures.
 
-## The site is a copy of production
+## Look at what the site holds before assuming
 
-`hrms.localhost` holds **real student records**. It is disposable and refreshed
-from production, so probing it is fine and expected — but anything that writes
-needs `frappe.db.rollback()`, and anything destructive deserves a look at the
-target first. Checking a fix against real data is normal practice here and has
-repeatedly caught things tests did not.
+The dev site is disposable and gets refreshed, and those refreshes have at
+times come from production — `hrms.localhost` was carrying real student records
+in October 2026. That is a fact about one moment, not a property of the site,
+so check rather than assume in either direction.
+
+The handling is the same either way: probing is fine and expected, anything
+that writes needs `frappe.db.rollback()`, and anything destructive deserves a
+look at the target first. Checking a fix against whatever data is actually
+there is normal practice here and has repeatedly caught what tests did not.
 
 ---
 

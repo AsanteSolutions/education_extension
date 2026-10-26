@@ -13,7 +13,9 @@ Bench apps alongside it: `frappe`, `erpnext`, `education`, `lms`, `hrms`,
 ## Run the tests
 
 **`bench run-tests` cannot bootstrap this site** (overlapping Fiscal Year), so
-every suite exposes a `run_tests()` you call yourself. The whole set:
+every suite exposes a `run_tests()` you call yourself. CI is different: it runs
+`bench run-tests --app education_extension` against a fresh `test_site`, where
+there is nothing to clash with. The whole set, locally:
 
 ```python
 # ~/AsanteHRMS/sites, with ~/AsanteHRMS/env/bin/python
@@ -34,9 +36,10 @@ and you get spurious `NameError`s. Through the console, load the script with
 `exec(open(path).read(), globals())` — the explicit `globals()` is what stops
 that, and leaving it off is how the trap gets sprung.
 
-A doctype's own `test_*.py` under `doctype/<name>/` is where Frappe looks but
-never runs here; the runnable siblings live in `education_extension/`. If you
-add a test class, add it to that module's `run_tests()` tuple or it never runs.
+A doctype's own `test_*.py` under `doctype/<name>/` is where Frappe looks; the
+runnable siblings live in `education_extension/`. Add a new test class to its
+module's `run_tests()` tuple — otherwise it runs in CI but not for anyone
+working locally, which is the worst of both.
 
 `testing.py` has `needs_education_app(case)` and `needs_doctype(case, *names)`
 for skipping where a site lacks the fixtures.

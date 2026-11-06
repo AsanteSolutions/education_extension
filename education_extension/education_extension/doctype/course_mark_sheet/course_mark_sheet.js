@@ -334,6 +334,7 @@ function render_mark_entry(frm) {
 	// otherwise ask eighty times. The cells typed but not yet saved go with the
 	// request, so what is shown is what is on screen, not what was last saved.
 	let totals_pending = null
+	let totals_failed = false
 	function refresh_totals() {
 		if (!totals_apply) return
 		clearTimeout(totals_pending)
@@ -342,6 +343,7 @@ function render_mark_entry(frm) {
 				.call('mark_totals', { changes: [...changed.values()] })
 				.then((r) => {
 					const totals = (r && r.message) || {}
+					totals_failed = false
 					$wrapper.find('.total-cell').each(function () {
 						const $cell = $(this)
 						const row = totals[$cell.attr('data-student')]
@@ -352,9 +354,16 @@ function render_mark_entry(frm) {
 						$cell.toggleClass('text-muted', !value || value === '-')
 					})
 				})
-				.catch(() => {
-					// A failed total is not a reason to interrupt mark entry.
-					$wrapper.find('.total-cell').text('–').addClass('text-muted')
+				.catch((error) => {
+					// A failed total is not a reason to interrupt mark entry, but
+					// it must not look like one either: a dash here is what an
+					// unmarked student shows, so failing quietly would read as
+					// "no marks yet" and be invisible. Said once, in the status
+					// line, and left in the console to be looked at.
+					console.error('mark totals', error)
+					totals_failed = true
+					$wrapper.find('.total-cell').text('?').removeClass('text-muted')
+					update_status()
 				})
 		}, 400)
 	}
@@ -366,6 +375,12 @@ function render_mark_entry(frm) {
 		const outstanding = frm.doc.entries.filter((entry) => entry.status === 'Not Marked').length
 		let text = __('{0} of {1} entered', [total - outstanding, total])
 		if (changed.size) text += ' &middot; <b>' + __('{0} unsaved', [changed.size]) + '</b>'
+		if (totals_failed) {
+			text +=
+				' &middot; <span class="text-danger">' +
+				__('The DP and final mark could not be worked out.') +
+				'</span>'
+		}
 		$status.html(text)
 		$save.prop('disabled', !editable || !changed.size)
 	}

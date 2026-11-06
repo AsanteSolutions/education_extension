@@ -189,9 +189,18 @@ function render_mark_entry(frm) {
 	const escape = frappe.utils.escape_html
 	const changed = new Map()
 
-	const header = assessments
-		.map((name) => '<th class="text-center" style="min-width:88px">' + escape(name) + '</th>')
-		.join('')
+	// A supplementary sheet is one paper standing in for an exam, not a course,
+	// so it has no semester or final mark of its own to show.
+	const totals_apply = frm.doc.sitting !== 'Supplementary'
+
+	const header =
+		assessments
+			.map((name) => '<th class="text-center" style="min-width:88px">' + escape(name) + '</th>')
+			.join('') +
+		(totals_apply
+			? '<th class="text-center" style="min-width:72px">' + __('DP') + '</th>' +
+			  '<th class="text-center" style="min-width:88px">' + __('Final Mark') + '</th>'
+			: '')
 
 	const body = students
 		.map((student, row) => {
@@ -217,10 +226,21 @@ function render_mark_entry(frm) {
 				})
 				.join('')
 
+			// Worked out by the server from the marks on the left, including the
+			// ones typed but not saved. Read-only because they are not a mark
+			// anybody enters -- they are what the entered marks come to.
+			const totals = totals_apply
+				? '<td class="text-center total-cell text-muted" data-kind="dp"' +
+				  ' data-student="' + escape(student.id) + '">&ndash;</td>' +
+				  '<td class="text-center total-cell text-muted" data-kind="final_mark"' +
+				  ' data-student="' + escape(student.id) + '">&ndash;</td>'
+				: ''
+
 			return (
 				'<tr><td class="text-muted small" style="white-space:nowrap">' + escape(student.id) + '</td>' +
 				'<td style="white-space:nowrap">' + escape(student.name) + '</td>' +
 				columns +
+				totals +
 				'</tr>'
 			)
 		})
@@ -253,6 +273,42 @@ function render_mark_entry(frm) {
 	const $status = $wrapper.find('.mark-entry-status')
 	const $save = $wrapper.find('.mark-entry-save')
 
+	// The totals come from the server, which is the only place the weightings
+	// live. Working them out here would put a second copy of the course mark
+	// scheme in the browser, and the two would drift -- the portal's grades page
+	// was rebuilt for exactly that reason.
+	//
+	// Debounced, because a lecturer entering a column of eighty marks would
+	// otherwise ask eighty times. The cells typed but not yet saved go with the
+	// request, so what is shown is what is on screen, not what was last saved.
+	let totals_pending = null
+	function refresh_totals() {
+		if (!totals_apply) return
+		clearTimeout(totals_pending)
+		totals_pending = setTimeout(() => {
+			frm
+				.call('mark_totals', { changes: [...changed.values()] })
+				.then((r) => {
+					const totals = (r && r.message) || {}
+					$wrapper.find('.total-cell').each(function () {
+						const $cell = $(this)
+						const row = totals[$cell.attr('data-student')]
+						const value = row && row[$cell.attr('data-kind')]
+						// A dash is what the server sends for a mark it cannot
+						// work out yet, so it is left reading as one.
+						$cell.text(value && value !== '-' ? value + '%' : '–')
+						$cell.toggleClass('text-muted', !value || value === '-')
+					})
+				})
+				.catch(() => {
+					// A failed total is not a reason to interrupt mark entry.
+					$wrapper.find('.total-cell').text('–').addClass('text-muted')
+				})
+		}, 400)
+	}
+
+	refresh_totals()
+
 	function update_status() {
 		const total = frm.doc.entries.length
 		const outstanding = frm.doc.entries.filter((entry) => entry.status === 'Not Marked').length
@@ -282,6 +338,7 @@ function render_mark_entry(frm) {
 			raw_score: parsed.raw_score,
 		})
 		update_status()
+		refresh_totals()
 	})
 
 	// Enter and the arrows move down the column, which is how a column of marks
@@ -307,6 +364,7 @@ function render_mark_entry(frm) {
 			.call('save_marks', { changes: [...changed.values()] })
 			.then((r) => {
 				changed.clear()
+				refresh_totals()
 				if (r.message && r.message.ignored) {
 					frappe.msgprint({
 						title: __('Some marks were not saved'),

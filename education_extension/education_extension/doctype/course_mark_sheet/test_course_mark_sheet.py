@@ -399,6 +399,94 @@ class TestCorrectingAMarkTakesTheModerationOff(FrappeTestCase):
 		self.assertFalse(doc.flags.get("moderating"))
 
 
+class TestTheEntryGridShowsWhatTheMarksComeTo(FrappeTestCase):
+	"""The DP and final mark beside the marks being entered.
+
+	Read-only, and worked out by the server: the weightings live in the course
+	mark scheme, and a copy of them in the browser is how the portal's grades
+	page came to show a different number from the printed report.
+	"""
+
+	def setUp(self):
+		sheets = frappe.get_all(
+			"Course Mark Sheet",
+			filters={"sitting": "Main"},
+			pluck="name",
+			order_by="creation desc",
+		)
+		self.sheet = None
+		for name in sheets:
+			doc = frappe.get_doc("Course Mark Sheet", name)
+			if any(entry.status == "Marked" for entry in doc.entries):
+				self.sheet = doc
+				break
+		if not self.sheet:
+			self.skipTest("this site has no marked main sheet")
+
+	def tearDown(self):
+		frappe.db.rollback()
+
+	def test_it_agrees_with_what_qa_will_read(self):
+		"""The point of asking the server rather than working it out twice."""
+		totals = self.sheet.mark_totals()
+		review = {row["student"]: row for row in self.sheet.qa_review()["rows"]}
+
+		self.assertTrue(totals, "no totals came back")
+		for student, row in totals.items():
+			self.assertEqual(row["dp"], review[student]["dp"], student)
+			self.assertEqual(row["final_mark"], review[student]["final_mark"], student)
+
+	def test_an_unsaved_mark_moves_the_total(self):
+		"""What the lecturer is typing has to count, or the number is stale."""
+		entry = next(e for e in self.sheet.entries if e.status == "Marked" and e.raw_score)
+		before = self.sheet.mark_totals()[entry.student]
+
+		fresh = frappe.get_doc("Course Mark Sheet", self.sheet.name)
+		after = fresh.mark_totals(
+			[
+				{
+					"student": entry.student,
+					"assessment_group": entry.assessment_group,
+					"status": "Marked",
+					"raw_score": 0,
+				}
+			]
+		)[entry.student]
+
+		self.assertNotEqual(after["dp"], before["dp"], "the pending mark was not counted")
+
+	def test_asking_writes_nothing(self):
+		"""It is a preview. The marks are saved by Save Marks and nothing else."""
+		entry = next(e for e in self.sheet.entries if e.status == "Marked" and e.raw_score)
+		was = frappe.db.get_value("Course Mark Sheet Entry", entry.name, "raw_score")
+
+		fresh = frappe.get_doc("Course Mark Sheet", self.sheet.name)
+		fresh.mark_totals(
+			[
+				{
+					"student": entry.student,
+					"assessment_group": entry.assessment_group,
+					"status": "Marked",
+					"raw_score": 0,
+				}
+			]
+		)
+
+		self.assertEqual(
+			frappe.db.get_value("Course Mark Sheet Entry", entry.name, "raw_score"),
+			was,
+			"a preview wrote to the sheet",
+		)
+
+	def test_a_supplementary_sheet_has_no_course_total(self):
+		"""One paper standing in for an exam is not a course mark."""
+		name = frappe.db.get_value("Course Mark Sheet", {"sitting": "Supplementary"}, "name")
+		if not name:
+			self.skipTest("this site has no supplementary sheet")
+
+		self.assertEqual(frappe.get_doc("Course Mark Sheet", name).mark_totals(), {})
+
+
 def run_tests(verbosity=2):
 	"""Run these from a console, since bench run-tests cannot bootstrap this site.
 
@@ -413,6 +501,7 @@ def run_tests(verbosity=2):
 		TestApprovalCannotBeSkipped,
 		TestModerationIsNotEditable,
 		TestCorrectingAMarkTakesTheModerationOff,
+		TestTheEntryGridShowsWhatTheMarksComeTo,
 	):
 		suite.addTests(loader.loadTestsFromTestCase(case))
 	return unittest.TextTestRunner(verbosity=verbosity).run(suite)

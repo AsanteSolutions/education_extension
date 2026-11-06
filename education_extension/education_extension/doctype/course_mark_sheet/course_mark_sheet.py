@@ -317,21 +317,13 @@ class CourseMarkSheet(Document):
 		"""How many marks are still neither entered nor accounted for as absent."""
 		return sum(1 for entry in self.entries if entry.status == NOT_MARKED)
 
-	@frappe.whitelist()
-	def save_marks(self, changes):
-		"""Apply a batch of marks from the entry grid.
+	def _apply_changes(self, changes):
+		"""Put a batch of marks onto the entries in memory, as (applied, ignored).
 
-		The grid sends only the cells that changed, so a lecturer working through
-		a course of eighty students is not posting eight hundred rows back on every
-		save. Anything the sheet does not have a row for is ignored rather than
-		created: the roll comes from the enrolment, not from the browser.
+		Apart from `save_marks`, which saves afterwards, this is what lets
+		`mark_totals` work out what the sheet would come to without writing
+		anything: the same marks, through the same door.
 		"""
-		if self.workflow_state not in ENTRY_STATES:
-			frappe.throw(_("Marks can only be entered while the sheet is with the lecturer."))
-
-		if isinstance(changes, str):
-			changes = frappe.parse_json(changes)
-
 		by_key = {entry_key(entry.student, entry.assessment_group): entry for entry in self.entries}
 		applied = 0
 		ignored = 0
@@ -349,6 +341,56 @@ class CourseMarkSheet(Document):
 			entry.status = status
 			entry.raw_score = float(change.get("raw_score") or 0) if status == MARKED else 0
 			applied += 1
+
+		return applied, ignored
+
+	@frappe.whitelist()
+	def mark_totals(self, changes=None):
+		"""What each student's semester and final mark currently come to.
+
+		For the entry grid, so a lecturer can see a mark land in the totals
+		instead of guessing at the weightings. `changes` carries the cells typed
+		but not yet saved, applied here in memory; nothing is written.
+
+		Worked out by asking for the QA review and keeping two of its columns,
+		rather than by a calculation of its own. The weightings already exist
+		twice too often -- the portal's grades page was built this way after the
+		browser had its own copy of them and they drifted -- and the number a
+		lecturer is entering against has to be the number QA will read.
+
+		A supplementary sheet is one paper and has no semester or final mark of
+		its own, so it gets none here either.
+		"""
+		if isinstance(changes, str):
+			changes = frappe.parse_json(changes)
+		if changes:
+			self._apply_changes(changes)
+
+		review = self.qa_review()
+		if review["mode"] == "supplementary":
+			return {}
+
+		return {
+			row["student"]: {"dp": row["dp"], "final_mark": row["final_mark"]}
+			for row in review["rows"]
+		}
+
+	@frappe.whitelist()
+	def save_marks(self, changes):
+		"""Apply a batch of marks from the entry grid.
+
+		The grid sends only the cells that changed, so a lecturer working through
+		a course of eighty students is not posting eight hundred rows back on every
+		save. Anything the sheet does not have a row for is ignored rather than
+		created: the roll comes from the enrolment, not from the browser.
+		"""
+		if self.workflow_state not in ENTRY_STATES:
+			frappe.throw(_("Marks can only be entered while the sheet is with the lecturer."))
+
+		if isinstance(changes, str):
+			changes = frappe.parse_json(changes)
+
+		applied, ignored = self._apply_changes(changes)
 
 		# An adjustment is worked out from the marks and approved as a pair with
 		# them, so a mark changing afterwards leaves it describing numbers that

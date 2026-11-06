@@ -345,6 +345,76 @@ class CourseMarkSheet(Document):
 		return applied, ignored
 
 	@frappe.whitelist()
+	def approve_semester_mark(self):
+		"""Sign off the coursework so the semester mark can go to students.
+
+		The exams are marked weeks after the coursework is, and a student is
+		entitled to know what they are carrying into the exam room. Approving the
+		whole sheet cannot say that -- the exam marks are not there yet -- so the
+		coursework half is signed off on its own, and only it travels.
+
+		It is a signature, not a switch: who gave it and when are recorded, and
+		it comes off by itself the moment a coursework mark changes underneath
+		it. Refused while any coursework is still outstanding, because a semester
+		mark worked out from half the marks is not the semester mark.
+		"""
+		frappe.only_for(("Education Manager", "System Manager"))
+
+		if self.semester_mark_approved:
+			frappe.throw(_("The semester mark has already been signed off."))
+
+		outstanding = self.unmarked_coursework()
+		if outstanding:
+			frappe.throw(
+				_("These coursework assessments are not marked yet: {0}.").format(
+					", ".join(sorted(outstanding))
+				)
+			)
+
+		self.semester_mark_approved = 1
+		self.semester_mark_approved_by = frappe.session.user
+		self.semester_mark_approved_on = now_datetime()
+		self.flags.ignore_validate_update_after_submit = True
+		self.save()
+		self.add_comment(
+			"Info",
+			_("Semester mark signed off. Students may see it once the term's Semester Mark release date passes."),
+		)
+		return {"approved": True}
+
+	@frappe.whitelist()
+	def withdraw_semester_mark(self):
+		"""Take the signature off, and the semester mark away from students."""
+		frappe.only_for(("Education Manager", "System Manager"))
+
+		if not self.semester_mark_approved:
+			return {"approved": False}
+
+		self._clear_semester_mark_approval()
+		self.save()
+		self.add_comment("Info", _("Semester mark sign-off withdrawn."))
+		return {"approved": False}
+
+	def _clear_semester_mark_approval(self):
+		self.semester_mark_approved = 0
+		self.semester_mark_approved_by = None
+		self.semester_mark_approved_on = None
+		self.flags.ignore_validate_update_after_submit = True
+
+	def unmarked_coursework(self):
+		"""The coursework assessments still waiting on a mark, as a set.
+
+		Named by assessment rather than counted, so a refusal can say which.
+		"""
+		components = self.assessment_components()
+		return {
+			entry.assessment_group
+			for entry in self.entries
+			if entry.status == NOT_MARKED
+			and components.get(entry.assessment_group) == COURSEWORK
+		}
+
+	@frappe.whitelist()
 	def mark_totals(self, changes=None):
 		"""What each student's semester and final mark currently come to.
 
@@ -392,6 +462,20 @@ class CourseMarkSheet(Document):
 
 		applied, ignored = self._apply_changes(changes)
 
+		# A signed-off semester mark is a published number: a student may already
+		# have seen it. Changing a coursework mark underneath it takes the
+		# signature off, the way a moderation comes off below, so the DP a
+		# student was shown is never quietly replaced by a different one.
+		components = self.assessment_components()
+		touched_coursework = any(
+			components.get(change.get("assessment_group")) == COURSEWORK for change in changes
+		)
+		semester_mark_withdrawn = bool(
+			applied and touched_coursework and self.semester_mark_approved
+		)
+		if semester_mark_withdrawn:
+			self._clear_semester_mark_approval()
+
 		# An adjustment is worked out from the marks and approved as a pair with
 		# them, so a mark changing afterwards leaves it describing numbers that
 		# are no longer there. A sheet returned for correction keeps its
@@ -425,6 +509,15 @@ class CourseMarkSheet(Document):
 					"out from have been corrected. Moderate again before approving."
 				).format(method, value),
 			)
+
+		if semester_mark_withdrawn:
+			self.add_comment(
+				"Info",
+				_(
+					"The semester mark sign-off was taken off: a coursework mark has "
+					"changed. Sign it off again once the marks are right."
+				),
+			)
 		# `ignored` is reported rather than swallowed: a cell the sheet does not
 		# recognise is far more likely a bug than a hostile browser, and saying
 		# nothing is how a save that saved nothing looks like it worked.
@@ -435,6 +528,7 @@ class CourseMarkSheet(Document):
 			# So the grid can say so. A moderation disappearing with no word is
 			# how QA ends up approving a sheet they think is still adjusted.
 			"moderation_withdrawn": bool(withdrawn),
+			"semester_mark_withdrawn": semester_mark_withdrawn,
 		}
 
 	# Once the marks are in, the sheet stops being a grid to fill and becomes a

@@ -30,6 +30,9 @@
   "moderated_on",
   "moderation_reason",
   "section_break_trail",
+  "semester_mark_approved",
+  "semester_mark_approved_by",
+  "semester_mark_approved_on",
   "entered_by",
   "checked_by",
   "approved_by",
@@ -214,6 +217,28 @@
    "fieldname": "section_break_trail",
    "fieldtype": "Section Break",
    "label": "Trail"
+  },
+  {
+   "description": "Set once the coursework has been checked, so the semester mark can go to students before the exams are marked. The exam marks still need the sheet approved.",
+   "fieldname": "semester_mark_approved",
+   "fieldtype": "Check",
+   "label": "Semester Mark Approved",
+   "read_only": 1
+  },
+  {
+   "depends_on": "semester_mark_approved",
+   "fieldname": "semester_mark_approved_by",
+   "fieldtype": "Link",
+   "label": "Semester Mark Approved By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "depends_on": "semester_mark_approved",
+   "fieldname": "semester_mark_approved_on",
+   "fieldtype": "Datetime",
+   "label": "Semester Mark Approved On",
+   "read_only": 1
   },
   {
    "fieldname": "entered_by",

@@ -487,6 +487,150 @@ class TestTheEntryGridShowsWhatTheMarksComeTo(FrappeTestCase):
 		self.assertEqual(frappe.get_doc("Course Mark Sheet", name).mark_totals(), {})
 
 
+class TestSigningOffTheSemesterMark(FrappeTestCase):
+	"""The coursework half, signed off before the exams are marked.
+
+	Exams are marked weeks after coursework, so approving the whole sheet cannot
+	release a semester mark in time for the exam room. The coursework is signed
+	off on its own instead -- and only it travels on that signature.
+	"""
+
+	def setUp(self):
+		name = None
+		for candidate in frappe.get_all(
+			"Course Mark Sheet",
+			filters={"sitting": "Main", "docstatus": 0},
+			pluck="name",
+			order_by="creation desc",
+		):
+			doc = frappe.get_doc("Course Mark Sheet", candidate)
+			if doc.entries and not doc.unmarked_coursework():
+				name = candidate
+				break
+		if not name:
+			self.skipTest("no unapproved main sheet has its coursework marked")
+
+		self.sheet = frappe.get_doc("Course Mark Sheet", name)
+		self.student = self.sheet.entries[0].student
+		self.components = self.sheet.assessment_components()
+
+	def tearDown(self):
+		frappe.set_user("Administrator")
+		frappe.db.rollback()
+
+	def seen_by_students(self):
+		from education_extension.education_extension.marking import get_assessment_results
+
+		rows = get_assessment_results(self.student, self.sheet.academic_term).get(
+			self.sheet.course, []
+		)
+		return {row["assessment_group"] for row in rows}
+
+	def test_nothing_reaches_students_before_it_is_signed_off(self):
+		self.assertEqual(self.seen_by_students(), set())
+
+	def test_the_coursework_reaches_students_once_it_is(self):
+		self.sheet.approve_semester_mark()
+		seen = self.seen_by_students()
+
+		self.assertTrue(seen, "the coursework did not reach the student")
+		for group in seen:
+			self.assertEqual(
+				self.components.get(group),
+				"Coursework",
+				"{0} is not coursework and should have waited for approval".format(group),
+			)
+
+	def test_the_exam_marks_do_not_travel_on_it(self):
+		"""The one that matters. A signature on the coursework is not a
+		signature on marks nobody has checked.
+
+		The exam marks are entered first, on purpose. A sheet whose exams are
+		still blank has nothing to leak, so asserting against one passes however
+		wide the rule is -- which is exactly what it did before this line.
+		"""
+		exams = [
+			entry
+			for entry in self.sheet.entries
+			if self.components.get(entry.assessment_group) != "Coursework"
+		]
+		if not exams:
+			self.skipTest("that sheet carries no examination assessments")
+
+		for entry in exams:
+			entry.status = "Marked"
+			entry.raw_score = 40
+		self.sheet.flags.ignore_validate_update_after_submit = True
+		self.sheet.save()
+
+		self.sheet.approve_semester_mark()
+		seen = self.seen_by_students()
+		self.assertTrue(seen, "the coursework did not reach the student")
+		self.assertEqual(
+			seen & {entry.assessment_group for entry in exams},
+			set(),
+			"an exam mark reached a student on the semester mark signature",
+		)
+
+	def test_it_records_who_signed_it_and_when(self):
+		self.sheet.approve_semester_mark()
+		self.sheet.reload()
+
+		self.assertTrue(self.sheet.semester_mark_approved)
+		self.assertEqual(self.sheet.semester_mark_approved_by, frappe.session.user)
+		self.assertTrue(self.sheet.semester_mark_approved_on)
+
+	def test_it_is_refused_while_coursework_is_outstanding(self):
+		"""A semester mark worked out from half the marks is not the semester
+		mark, and a student would be shown it as though it were."""
+		entry = next(
+			e
+			for e in self.sheet.entries
+			if self.components.get(e.assessment_group) == "Coursework"
+		)
+		entry.status = "Not Marked"
+		entry.raw_score = 0
+		self.sheet.flags.ignore_validate_update_after_submit = True
+		self.sheet.save()
+
+		with self.assertRaises(frappe.ValidationError):
+			self.sheet.approve_semester_mark()
+
+	def test_changing_a_coursework_mark_takes_the_sign_off_off(self):
+		"""A student may already have seen it, so it must not change underneath
+		them without the signature going too."""
+		self.sheet.approve_semester_mark()
+		entry = next(
+			e
+			for e in self.sheet.entries
+			if self.components.get(e.assessment_group) == "Coursework"
+		)
+
+		self.sheet.workflow_state = "In Entry"
+		result = self.sheet.save_marks(
+			[
+				{
+					"student": entry.student,
+					"assessment_group": entry.assessment_group,
+					"status": "Marked",
+					"raw_score": 1,
+				}
+			]
+		)
+
+		self.assertTrue(result["semester_mark_withdrawn"])
+		self.sheet.reload()
+		self.assertFalse(self.sheet.semester_mark_approved)
+		self.assertEqual(self.seen_by_students(), set(), "the marks stayed visible")
+
+	def test_withdrawing_takes_it_back_from_students(self):
+		self.sheet.approve_semester_mark()
+		self.assertTrue(self.seen_by_students())
+
+		self.sheet.withdraw_semester_mark()
+		self.assertEqual(self.seen_by_students(), set())
+
+
 def run_tests(verbosity=2):
 	"""Run these from a console, since bench run-tests cannot bootstrap this site.
 
@@ -502,6 +646,7 @@ def run_tests(verbosity=2):
 		TestModerationIsNotEditable,
 		TestCorrectingAMarkTakesTheModerationOff,
 		TestTheEntryGridShowsWhatTheMarksComeTo,
+		TestSigningOffTheSemesterMark,
 	):
 		suite.addTests(loader.loadTestsFromTestCase(case))
 	return unittest.TextTestRunner(verbosity=verbosity).run(suite)

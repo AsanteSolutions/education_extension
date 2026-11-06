@@ -346,11 +346,16 @@ def _merge_sheet_marks(stored, from_sheet):
 
 
 def _sheet_mark_rows(condition, params):
-	"""Marks from approved Course Mark Sheets, with absences resolved.
+	"""Marks a sheet has signed off, with absences resolved.
+
+	Approved means the whole sheet. Short of that, a sheet whose semester mark
+	has been signed off carries its coursework and nothing else -- which is what
+	lets the DP reach a student while the exam marks are still being entered.
 
 	The component comes from the scheme the sheet was stamped with, because
 	whether an absence scores zero or leaves a hole depends on which half of the
-	mark the assessment belongs to.
+	mark the assessment belongs to -- and now also because it decides which
+	marks a semester-mark signature covers.
 	"""
 	return frappe.db.sql(
 		"""
@@ -362,8 +367,16 @@ def _sheet_mark_rows(condition, params):
 		left join `tabCourse Mark Scheme Criterion` criterion
 		       on criterion.parent = sheet.mark_scheme
 		      and criterion.assessment_group = entry.assessment_group
-		where sheet.docstatus = 1
-		  and entry.status in ('Marked', 'Absent')
+		where entry.status in ('Marked', 'Absent')
+		  and (
+		    sheet.docstatus = 1
+		    -- The semester mark can be signed off before the exams are marked, so
+		    -- a student knows what they are carrying into the exam room. Only the
+		    -- coursework half travels on that signature: the exam marks are not
+		    -- checked yet, and an unrecognised assessment is not coursework by
+		    -- default -- it waits for the sheet to be approved like anything else.
+		    or (sheet.semester_mark_approved = 1 and criterion.component = 'Coursework')
+		  )
 		  and {condition}
 		""".format(condition=condition),
 		params,

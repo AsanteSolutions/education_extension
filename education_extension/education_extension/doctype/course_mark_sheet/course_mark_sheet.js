@@ -27,6 +27,26 @@ frappe.ui.form.on('Course Mark Sheet', {
 			frm.add_custom_button(__('Return for Correction'), () => return_for_correction(frm))
 		}
 
+		// The coursework is marked weeks before the exams are, so the semester
+		// mark is signed off on its own and students can see what they carry
+		// into the exam room. Offered until the sheet itself is approved, after
+		// which the whole sheet speaks for the marks.
+		if (frm.doc.docstatus === 0) {
+			if (frm.doc.semester_mark_approved) {
+				frm.add_custom_button(
+					__('Withdraw Semester Mark'),
+					() => withdraw_semester_mark(frm),
+					__('Semester Mark'),
+				)
+			} else {
+				frm.add_custom_button(
+					__('Approve Semester Mark'),
+					() => approve_semester_mark(frm),
+					__('Semester Mark'),
+				)
+			}
+		}
+
 		show_progress(frm)
 		render_mark_entry(frm)
 		render_qa_review(frm)
@@ -54,6 +74,32 @@ function generate_entries(frm) {
 			indicator: 'green',
 		})
 		frm.reload_doc()
+	})
+}
+
+// Signing off the coursework half. The server refuses while any of it is
+// unmarked and says which assessments are outstanding, so the check lives where
+// the components do rather than being guessed at from the entries here.
+function approve_semester_mark(frm) {
+	frappe.confirm(
+		__(
+			'Sign off the semester mark? Students will see it once the Semester Mark release date for this term has passed. The exam marks are not included and still need the sheet approved.',
+		),
+		() => {
+			frm.call('approve_semester_mark').then(() => {
+				frappe.show_alert({ message: __('Semester mark signed off'), indicator: 'green' })
+				frm.reload_doc()
+			})
+		},
+	)
+}
+
+function withdraw_semester_mark(frm) {
+	frappe.confirm(__('Take the semester mark back from students?'), () => {
+		frm.call('withdraw_semester_mark').then(() => {
+			frappe.show_alert({ message: __('Semester mark withdrawn'), indicator: 'orange' })
+			frm.reload_doc()
+		})
 	})
 }
 
@@ -454,6 +500,18 @@ function render_mark_entry(frm) {
 				// was worked out from marks that have just changed, so it comes
 				// off — and a moderation that disappears quietly is how a sheet
 				// gets approved by someone who thinks it is still adjusted.
+				// Same reasoning as the moderation notice below: a student may
+				// already have seen this semester mark, so it going away is not
+				// something to discover later.
+				if (r.message && r.message.semester_mark_withdrawn) {
+					frappe.msgprint({
+						title: __('Semester mark withdrawn'),
+						message: __(
+							'The semester mark had been signed off and a coursework mark has just changed, so the sign-off came off with it. Students cannot see the semester mark until it is signed off again.',
+						),
+						indicator: 'orange',
+					})
+				}
 				if (r.message && r.message.moderation_withdrawn) {
 					frappe.msgprint({
 						title: __('Moderation removed'),

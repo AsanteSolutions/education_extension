@@ -510,13 +510,21 @@ class TestSigningOffTheSemesterMark(FrappeTestCase):
 		if not name:
 			self.skipTest("no unapproved main sheet has its coursework marked")
 
+		frappe.db.savepoint("semester_mark_test")
 		self.sheet = frappe.get_doc("Course Mark Sheet", name)
+		# Started from a known state rather than whatever the site happens to
+		# hold: a sheet left signed off by anything else would make half of
+		# these assert about the wrong thing.
+		if self.sheet.semester_mark_approved:
+			self.sheet.withdraw_semester_mark()
 		self.student = self.sheet.entries[0].student
 		self.components = self.sheet.assessment_components()
 
 	def tearDown(self):
 		frappe.set_user("Administrator")
-		frappe.db.rollback()
+		# To the savepoint, not just `rollback()`. These tests sign off and
+		# cancel real records, and a bare rollback left both on the site.
+		frappe.db.rollback(save_point="semester_mark_test")
 
 	def seen_by_students(self):
 		from education_extension.education_extension.marking import get_assessment_results
@@ -631,6 +639,165 @@ class TestSigningOffTheSemesterMark(FrappeTestCase):
 		self.assertEqual(self.seen_by_students(), set())
 
 
+class TestCorrectingAMarkSchemeAfterMarkingHasStarted(FrappeTestCase):
+	"""A scheme is submittable, so correcting one means cancelling and amending.
+
+	That leaves a new scheme and the sheet stamped with the old, now cancelled,
+	one -- and the stamp is read-only, so nothing could move it. The sheet went
+	on being marked against a scheme somebody had already withdrawn, and the
+	marks already entered were the reason not to start again.
+	"""
+
+	def setUp(self):
+		name = None
+		for candidate in frappe.get_all(
+			"Course Mark Sheet",
+			filters={"sitting": "Main", "docstatus": 0},
+			pluck="name",
+			order_by="creation desc",
+		):
+			doc = frappe.get_doc("Course Mark Sheet", candidate)
+			if doc.mark_scheme and any(e.status != "Not Marked" for e in doc.entries):
+				name = candidate
+				break
+		if not name:
+			self.skipTest("no unapproved main sheet has marks on it")
+
+		frappe.db.savepoint("scheme_change_test")
+		self.sheet = frappe.get_doc("Course Mark Sheet", name)
+		self.sheet.workflow_state = "In Entry"
+		self.marks = {
+			(e.student, e.assessment_group): (e.status, e.raw_score)
+			for e in self.sheet.entries
+			if e.status != "Not Marked"
+		}
+
+	def tearDown(self):
+		frappe.set_user("Administrator")
+		# Cancelling a scheme is not undone by a bare rollback here: an earlier
+		# run of these tests left a live course pointing at a cancelled scheme.
+		frappe.db.rollback(save_point="scheme_change_test")
+
+	def correct_the_scheme(self, drop=None, reweight=5):
+		"""Cancel and amend, which is the only way the doctype allows.
+
+		The weightings have to keep totalling 100 or the scheme refuses to
+		submit, so weight is moved between criteria rather than conjured: that
+		is what correcting a real mistake looks like.
+		"""
+		scheme = frappe.get_doc("Course Mark Scheme", self.sheet.mark_scheme)
+		scheme.cancel()
+		fixed = frappe.copy_doc(scheme)
+		fixed.amended_from = scheme.name
+		fixed.docstatus = 0
+
+		if drop:
+			freed = sum(
+				row.weightage or 0 for row in fixed.criteria if row.assessment_group == drop
+			)
+			fixed.criteria = [c for c in fixed.criteria if c.assessment_group != drop]
+			fixed.criteria[0].weightage = (fixed.criteria[0].weightage or 0) + freed
+		elif reweight and len(fixed.criteria) > 1:
+			# Taken off one and put on another, so the total does not move.
+			moved = min(reweight, fixed.criteria[1].weightage or 0)
+			fixed.criteria[0].weightage = (fixed.criteria[0].weightage or 0) + moved
+			fixed.criteria[1].weightage = (fixed.criteria[1].weightage or 0) - moved
+
+		for position, row in enumerate(fixed.criteria, start=1):
+			row.idx = position
+		fixed.insert()
+		fixed.submit()
+		self.sheet.reload()
+		return fixed
+
+	def test_the_sheet_is_left_on_a_cancelled_scheme(self):
+		"""The shape of the problem, asserted so the fix cannot be read as
+		solving something that was never broken."""
+		fixed = self.correct_the_scheme()
+
+		self.assertNotEqual(self.sheet.mark_scheme, fixed.name)
+		self.assertEqual(
+			frappe.db.get_value("Course Mark Scheme", self.sheet.mark_scheme, "docstatus"),
+			2,
+			"the stamped scheme should be the cancelled one",
+		)
+
+	def test_it_offers_the_move_and_says_what_it_costs(self):
+		dropped = self.sheet.entries[0].assessment_group
+		fixed = self.correct_the_scheme(drop=dropped)
+
+		change = self.sheet.scheme_change()
+		self.assertEqual(change["stamped"], self.sheet.mark_scheme)
+		self.assertEqual(change["current"], fixed.name)
+		self.assertIn(dropped, change["removed"])
+		self.assertIn(dropped, change["marks_lost"], "a mark about to be lost was not named")
+
+	def test_nothing_is_offered_when_the_scheme_has_not_moved(self):
+		self.assertIsNone(self.sheet.scheme_change())
+
+	def test_the_marks_already_entered_survive_the_move(self):
+		"""The whole point. Correcting a scheme must not cost a term of marking."""
+		self.correct_the_scheme()
+		self.sheet.restamp_scheme()
+		self.sheet.reload()
+
+		kept = {
+			(e.student, e.assessment_group): (e.status, e.raw_score)
+			for e in self.sheet.entries
+			if e.status != "Not Marked"
+		}
+		self.assertEqual(kept, self.marks)
+
+	def test_the_sheet_ends_up_on_the_live_scheme(self):
+		fixed = self.correct_the_scheme()
+		self.sheet.restamp_scheme()
+		self.sheet.reload()
+
+		self.assertEqual(self.sheet.mark_scheme, fixed.name)
+		self.assertEqual(
+			frappe.db.get_value("Course Mark Scheme", self.sheet.mark_scheme, "docstatus"), 1
+		)
+
+	def test_a_dropped_assessment_leaves_with_its_marks(self):
+		dropped = self.sheet.entries[0].assessment_group
+		self.correct_the_scheme(drop=dropped)
+		self.sheet.restamp_scheme()
+		self.sheet.reload()
+
+		self.assertFalse([e for e in self.sheet.entries if e.assessment_group == dropped])
+		survivors = {k: v for k, v in self.marks.items() if k[1] != dropped}
+		kept = {
+			(e.student, e.assessment_group): (e.status, e.raw_score)
+			for e in self.sheet.entries
+			if e.status != "Not Marked"
+		}
+		self.assertEqual(kept, survivors, "the move took marks it should have kept")
+
+	def test_a_semester_mark_signed_off_under_the_old_scheme_comes_off(self):
+		"""It was given against weightings that no longer apply."""
+		if self.sheet.unmarked_coursework():
+			self.skipTest("that sheet cannot be signed off yet")
+		if self.sheet.semester_mark_approved:
+			self.sheet.withdraw_semester_mark()
+		self.sheet.approve_semester_mark()
+		self.correct_the_scheme()
+
+		result = self.sheet.restamp_scheme()
+		self.sheet.reload()
+		self.assertTrue(result["semester_mark_withdrawn"])
+		self.assertFalse(self.sheet.semester_mark_approved)
+
+	def test_it_is_refused_once_the_sheet_has_left_the_lecturer(self):
+		"""Checking and moderation were done against the stamped scheme, so the
+		sheet comes back for correction first rather than changing underneath
+		whoever is reviewing it."""
+		self.correct_the_scheme()
+		self.sheet.workflow_state = "Submitted for Checking"
+
+		with self.assertRaises(frappe.ValidationError):
+			self.sheet.restamp_scheme()
+
+
 def run_tests(verbosity=2):
 	"""Run these from a console, since bench run-tests cannot bootstrap this site.
 
@@ -647,6 +814,7 @@ def run_tests(verbosity=2):
 		TestCorrectingAMarkTakesTheModerationOff,
 		TestTheEntryGridShowsWhatTheMarksComeTo,
 		TestSigningOffTheSemesterMark,
+		TestCorrectingAMarkSchemeAfterMarkingHasStarted,
 	):
 		suite.addTests(loader.loadTestsFromTestCase(case))
 	return unittest.TextTestRunner(verbosity=verbosity).run(suite)

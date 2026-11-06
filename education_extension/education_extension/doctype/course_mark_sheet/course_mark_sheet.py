@@ -699,6 +699,108 @@ class CourseMarkSheet(Document):
 			"entries": len(self.entries),
 		}
 
+	@frappe.whitelist()
+	def scheme_change(self):
+		"""What moving to the course's current scheme would do, or None.
+
+		A Course Mark Scheme is submittable, so correcting one means cancelling
+		and amending it -- which leaves a *new* scheme and the sheet still
+		stamped with the old, now cancelled, one. The stamp is deliberate: a
+		reprint has to reproduce the marks it was worked out under. But nothing
+		could move it afterwards, so a sheet went on being marked against a
+		scheme somebody had already withdrawn.
+		"""
+		current = get_scheme(self.course, self.academic_year)
+		if not current or current.name == self.mark_scheme:
+			return None
+
+		was = {row.assessment_group for row in self.scheme_criteria()}
+		now = {row.assessment_group for row in current.criteria}
+		removed = sorted(was - now)
+
+		return {
+			"stamped": self.mark_scheme,
+			"current": current.name,
+			"added": sorted(now - was),
+			"removed": removed,
+			# Named rather than counted: these are marks somebody typed, and the
+			# assessment they belong to is no longer on the scheme, so moving to
+			# it throws them away.
+			"marks_lost": sorted(
+				{
+					entry.assessment_group
+					for entry in self.entries
+					if entry.assessment_group in removed and entry.status != NOT_MARKED
+				}
+			),
+		}
+
+	def scheme_criteria(self):
+		"""The criteria of the scheme this sheet is stamped with, cancelled or not."""
+		if not self.mark_scheme:
+			return []
+		return frappe.get_doc("Course Mark Scheme", self.mark_scheme).criteria
+
+	@frappe.whitelist()
+	def restamp_scheme(self):
+		"""Move the sheet onto the course's current scheme, keeping the marks.
+
+		Everything the old scheme still describes keeps its mark; an assessment
+		it has gained is added empty, and one it has lost goes, which is why
+		`scheme_change` says what that costs before this is called.
+
+		A moderation and a semester-mark sign-off both go with it. Each was
+		worked out or given under weightings that have just changed, and neither
+		means anything against the new ones -- the same reason a moderation comes
+		off when a mark is corrected.
+		"""
+		frappe.only_for(("Academics User", "Education Manager", "System Manager"))
+
+		if self.workflow_state not in ENTRY_STATES:
+			frappe.throw(
+				_(
+					"The scheme can only be changed while the sheet is with the lecturer. "
+					"Return it for correction first."
+				)
+			)
+
+		change = self.scheme_change()
+		if not change:
+			frappe.throw(_("This sheet is already on the current mark scheme."))
+
+		moderated = self.moderation_method in (MODERATION_LINEAR, MODERATION_FLAT)
+		if moderated:
+			self.discard_moderation()
+			self.flags.moderating = True
+		signed_off = bool(self.semester_mark_approved)
+		if signed_off:
+			self._clear_semester_mark_approval()
+
+		self.mark_scheme = change["current"]
+		self.generate_entries()
+
+		self.add_comment(
+			"Info",
+			_("Mark scheme moved from {0} to {1}. Added: {2}. Removed: {3}.").format(
+				change["stamped"],
+				change["current"],
+				", ".join(change["added"]) or _("nothing"),
+				", ".join(change["removed"]) or _("nothing"),
+			),
+		)
+		if moderated:
+			self.add_comment(
+				"Info",
+				_("The moderation came off: it was worked out under the previous scheme."),
+			)
+		if signed_off:
+			self.add_comment(
+				"Info",
+				_("The semester mark sign-off came off: it was given under the previous scheme."),
+			)
+
+		return dict(change, moderation_withdrawn=moderated, semester_mark_withdrawn=signed_off)
+
 	def wanted_entries(self):
 		"""Which (student, assessment) pairs belong on this sheet.
 

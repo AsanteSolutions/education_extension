@@ -10,6 +10,7 @@ frappe.ui.form.on('Course Mark Sheet', {
 
 		if (ENTRY_STATES.includes(frm.doc.workflow_state)) {
 			frm.add_custom_button(__('Generate Entries'), () => generate_entries(frm))
+			offer_scheme_update(frm)
 		}
 
 		if (MODERATION_STATES.includes(frm.doc.workflow_state)) {
@@ -74,6 +75,61 @@ function generate_entries(frm) {
 			indicator: 'green',
 		})
 		frm.reload_doc()
+	})
+}
+
+// A mark scheme is submittable, so correcting one leaves a new scheme and this
+// sheet stamped with the old, cancelled one. Nothing could move it, so a sheet
+// went on being marked against a scheme that had been withdrawn. Offered only
+// when the two have actually parted company, and only with what it costs said
+// in advance -- an assessment the scheme has dropped takes its marks with it.
+function offer_scheme_update(frm) {
+	frm.call('scheme_change').then((r) => {
+		const change = r && r.message
+		if (!change) return
+
+		frm.dashboard.add_indicator(__('Mark scheme has been corrected'), 'orange')
+		frm.add_custom_button(__('Update Mark Scheme'), () => {
+			const lines = [
+				__('Move this sheet from {0} to {1}?', [change.stamped, change.current]),
+			]
+			if (change.added.length) {
+				lines.push(__('Added, and unmarked: {0}.', [change.added.join(', ')]))
+			}
+			if (change.removed.length) {
+				lines.push(__('No longer on the scheme: {0}.', [change.removed.join(', ')]))
+			}
+			if (change.marks_lost.length) {
+				lines.push(
+					'<b>' +
+						__('Marks already entered for {0} will be lost.', [
+							change.marks_lost.join(', '),
+						]) +
+						'</b>',
+				)
+			}
+			lines.push(__('Every other mark is kept.'))
+
+			frappe.confirm(lines.join('<br>'), () => {
+				frm.call('restamp_scheme').then((res) => {
+					const done = res && res.message
+					frappe.show_alert({
+						message: __('Now marking against {0}', [done.current]),
+						indicator: 'green',
+					})
+					if (done.moderation_withdrawn || done.semester_mark_withdrawn) {
+						frappe.msgprint({
+							title: __('Worked out under the old scheme'),
+							message: __(
+								'The weightings have changed, so anything resting on the old ones came off with them. Moderate and sign off again once the marks are right.',
+							),
+							indicator: 'orange',
+						})
+					}
+					frm.reload_doc()
+				})
+			})
+		})
 	})
 }
 

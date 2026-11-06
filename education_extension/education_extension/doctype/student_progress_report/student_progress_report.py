@@ -32,6 +32,16 @@ ISSUE_DATE_SUPPLEMENTARY = "Supplementary"
 ISSUE_DATE_REMARKING = "Remarking"
 ISSUE_DATE_AEGROTAT = "AEGROTAT"
 
+# The semester mark on its own, released before the exams are marked so a
+# student can see what they are carrying into the exam room. Called DP on the
+# portal and the semester mark on the printed report; both are this.
+#
+# Deliberately not one of the kinds `_issue_date_kinds` returns. Those pick the
+# Date of Issue stamped on the printed report, and this release says nothing
+# about when the report was issued -- adding it there would redate every
+# student's report the moment semester marks went out.
+ISSUE_DATE_SEMESTER_MARK = "Semester Mark"
+
 # Which sittings a course is examined and assessed on. These are the exceptions
 # to the standard shape (two tests, two assignments, a practical test, and theory,
 # practical and oral papers); a course code absent from a set follows the standard.

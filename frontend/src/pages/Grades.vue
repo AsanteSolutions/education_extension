@@ -22,6 +22,19 @@
 				</div>
 			</div>
 		</div>
+		<!-- Said once, above the table, rather than as a dash in every row. The
+		     semester mark goes out before the exams are marked so a student knows
+		     what they are carrying into the exam room; the rest follows later. -->
+		<div
+			v-if="view.state === 'table' && !hasFinalMarks"
+			class="flex items-start gap-2 border-b border-blue-200 bg-blue-50 px-5 py-3 text-sm text-blue-800"
+		>
+			<FeatherIcon name="info" class="mt-0.5 h-4 w-4 shrink-0" />
+			<div>
+				These are your semester marks. Exam results for this term have not been
+				published yet.
+			</div>
+		</div>
 		<div class="px-5 py-4">
 			<Dropdown class="mb-4" :options="allTerms">
 				<template #default="{ open }">
@@ -145,6 +158,10 @@ const loadTerm = (academic_year, academic_term) => {
 
 const tableRows = computed(() => grades.data?.rows || [])
 
+// Whether the exam results are out, or only the semester mark. The server
+// decides and sends nothing it has not released.
+const hasFinalMarks = computed(() => Boolean(grades.data?.has_final_marks))
+
 // Modules this student is registered for that have no marks and that the
 // academic office has written a notice about. Shown only alongside a table,
 // because that is the state the server works it out for: before a term is
@@ -157,9 +174,18 @@ const tableColumns = computed(() => {
 	const columns = [
 		{ label: 'Course', key: 'course' },
 		{ label: 'DP', key: 'dp' },
-		{ label: 'Final Mark', key: 'final_mark' },
-		{ label: 'Remark', key: 'remark' },
 	]
+
+	// Dropped, not blanked, while only the semester mark is out: the server
+	// sends no final marks or remarks then, so a column of dashes would read as
+	// "you scored nothing" rather than "these are not out yet".
+	if (grades.data?.has_final_marks) {
+		columns.push(
+			{ label: 'Final Mark', key: 'final_mark' },
+			{ label: 'Remark', key: 'remark' },
+		)
+	}
+
 	// The supplementary columns only appear when the student has something in
 	// them; the server decides, because it is what looked.
 	if (grades.data?.has_supplementary) {

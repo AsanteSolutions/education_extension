@@ -54,8 +54,8 @@
    "fieldname": "issue_date_for",
    "fieldtype": "Select",
    "label": "Issue Date For",
-   "options": "Standard\nSupplementary\nRemarking\nAEGROTAT",
-   "description": "Which run of marks this covers. Standard is the main sitting; the rest apply when the term also carries a supplementary or aegrotat sitting, or results that were remarked."
+   "options": "Standard\nSupplementary\nRemarking\nAEGROTAT\nSemester Mark",
+   "description": "Which run of marks this covers. Standard is the main sitting; Supplementary, AEGROTAT and Remarking apply when the term also carries one of those. Semester Mark releases the semester mark (the DP) on its own, before the exams are marked -- students see that column and nothing else."
   },
   {
    "fieldname": "academic_year",

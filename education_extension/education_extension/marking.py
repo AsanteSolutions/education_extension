@@ -24,6 +24,7 @@ from education_extension.education_extension.doctype.course_mark_scheme.course_m
 )
 from education_extension.education_extension.doctype.student_progress_report.student_progress_report import (
 	ISSUE_DATE_STANDARD,
+	ISSUE_DATE_SEMESTER_MARK,
 	ISSUE_DATE_SUPPLEMENTARY,
 	SUPP_GROUP,
 	calculate_final_results,
@@ -794,7 +795,13 @@ def get_student_grades(academic_year, academic_term):
 
 	# Approved is not the same as published. Marks wait here until the term's
 	# release moment, however far through checking and approval they are.
-	if not is_released(academic_year, academic_term, ISSUE_DATE_STANDARD):
+	#
+	# The semester mark can be let out ahead of the rest, so a student knows what
+	# they are carrying into the exam room. That is a release of its own: it
+	# shows the DP column and nothing else, and says so.
+	results_out = is_released(academic_year, academic_term, ISSUE_DATE_STANDARD)
+	semester_mark_out = is_released(academic_year, academic_term, ISSUE_DATE_SEMESTER_MARK)
+	if not (results_out or semester_mark_out):
 		return _nothing_to_show(
 			False, _("Results for {0} have not been published yet.").format(academic_term)
 		)
@@ -806,8 +813,10 @@ def get_student_grades(academic_year, academic_term):
 	comments = _remarks(student, academic_term, "Academic Remark", "remark")
 
 	# The supplementary sitting is released on its own date, so a student can be
-	# looking at their main marks while the supplementary ones are still held.
-	if is_released(academic_year, academic_term, ISSUE_DATE_SUPPLEMENTARY):
+	# looking at their main marks while the supplementary ones are still held. A
+	# supplementary is a re-sit of an exam, so it cannot be out while the exams
+	# themselves are not.
+	if results_out and is_released(academic_year, academic_term, ISSUE_DATE_SUPPLEMENTARY):
 		supplementary = _supplementary_marks(by_course)
 		supplementary_comments = _remarks(
 			student, academic_term, "Supplementary Academic Remark", "supp_remark"
@@ -825,8 +834,15 @@ def get_student_grades(academic_year, academic_term):
 				"id": course,
 				"course": course,
 				"dp": f"{round_half_up(computed['dp'])}%" if computed["dp_complete"] else NO_MARK,
-				"final_mark": f"{round_half_up(computed['final_mark'])}%" if complete else NO_MARK,
-				"remark": comments.get(course, NO_MARK),
+				# Left out rather than hidden where only the semester mark is out.
+				# This payload reaches the browser, so a final mark sent with a
+				# flag saying not to draw it is a published final mark.
+				"final_mark": (
+					f"{round_half_up(computed['final_mark'])}%"
+					if results_out and complete
+					else NO_MARK
+				),
+				"remark": comments.get(course, NO_MARK) if results_out else NO_MARK,
 				"supp_exam": supplementary.get(course, NO_MARK),
 				"supp_remark": supplementary_comments.get(course, NO_MARK),
 			}
@@ -837,8 +853,15 @@ def get_student_grades(academic_year, academic_term):
 		# The supplementary columns only appear when the student has something in
 		# them, which most do not.
 		"has_supplementary": bool(supplementary or supplementary_comments),
-		"without_results": _notices_for_missing_results(
-			student, academic_year, academic_term, by_course
+		# False while only the semester mark is out, so the page can drop the
+		# columns it has no values for and say why they are not there yet.
+		"has_final_marks": results_out,
+		# A module with nothing recorded is only worth saying once the results
+		# are out. Mid-term it is marking in progress, which is not news.
+		"without_results": (
+			_notices_for_missing_results(student, academic_year, academic_term, by_course)
+			if results_out
+			else []
 		),
 		"released": True,
 		"message": None,
@@ -884,7 +907,14 @@ def _notices_for_missing_results(student, academic_year, academic_term, by_cours
 def _nothing_to_show(released, message):
 	"""An empty table with the reason attached, so the portal can say why rather
 	than implying the student has no marks."""
-	return {"rows": [], "has_supplementary": False, "released": released, "message": message}
+	return {
+		"rows": [],
+		"has_supplementary": False,
+		"has_final_marks": False,
+		"without_results": [],
+		"released": released,
+		"message": message,
+	}
 
 
 def _supplementary_marks(by_course):

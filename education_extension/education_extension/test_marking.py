@@ -13,6 +13,9 @@ from education_extension.education_extension.doctype.course_mark_scheme.course_m
 	EXAMINATION,
 	legacy_criteria_for_course,
 )
+from education_extension.education_extension.doctype.student_progress_report import (
+	student_progress_report as report,
+)
 from education_extension.education_extension.doctype.student_progress_report.student_progress_report import (
 	calculate_final_results,
 )
@@ -426,6 +429,138 @@ class TestEverySittingCanBeReleased(FrappeTestCase):
 
 		self.assertEqual(KIND_FOR_SITTING[None], KIND_FOR_SITTING[MAIN])
 		self.assertEqual(KIND_FOR_SITTING[""], KIND_FOR_SITTING[MAIN])
+
+
+class TestTheSemesterMarkCanGoOutOnItsOwn(IntegrationTestCase):
+	"""The DP is released ahead of the exams, so a student knows what they are
+	carrying into the exam room.
+
+	It is a release of its own, with its own date and its own record, like the
+	supplementary one beside it. What matters is that it shows the semester mark
+	and *nothing else*: the payload reaches the browser, so an unreleased final
+	mark sent with a flag not to draw it is a published final mark.
+	"""
+
+	YEAR = "2026"
+
+	def setUp(self):
+		needs_education_app(self)
+		needs_doctype(self, "Progress Report Issue Date", "Assessment Result")
+
+		row = frappe.db.sql(
+			"""select student, academic_year, academic_term from `tabAssessment Result`
+			   where docstatus = 1 and ifnull(academic_term, '') != '' limit 1""",
+			as_dict=True,
+		)
+		if not row:
+			self.skipTest("this site has no submitted results")
+		self.case = row[0]
+
+		self.user = frappe.db.get_value("Student", self.case.student, "user")
+		if not self.user:
+			self.skipTest("that student has no portal account")
+
+	def tearDown(self):
+		frappe.set_user("Administrator")
+		frappe.db.rollback()
+
+	def release(self, kind, on="2020-01-01"):
+		frappe.get_doc(
+			{
+				"doctype": "Progress Report Issue Date",
+				"academic_year": self.case.academic_year,
+				"academic_term": self.case.academic_term,
+				"issue_date_for": kind,
+				"issue_date": on,
+			}
+		).insert().submit()
+
+	def withhold_everything(self):
+		for name in frappe.get_all(
+			"Progress Report Issue Date",
+			filters={
+				"academic_year": self.case.academic_year,
+				"academic_term": self.case.academic_term,
+				"docstatus": 1,
+			},
+			pluck="name",
+		):
+			frappe.get_doc("Progress Report Issue Date", name).cancel()
+
+	def grades(self):
+		from education_extension.education_extension.marking import get_student_grades
+
+		frappe.set_user(self.user)
+		try:
+			return get_student_grades(self.case.academic_year, self.case.academic_term)
+		finally:
+			frappe.set_user("Administrator")
+
+	def test_nothing_is_shown_before_either_release(self):
+		self.withhold_everything()
+		payload = self.grades()
+		self.assertEqual(payload["rows"], [])
+		self.assertTrue(payload["message"])
+
+	def test_the_semester_mark_alone_opens_the_table(self):
+		self.withhold_everything()
+		self.release(report.ISSUE_DATE_SEMESTER_MARK)
+
+		payload = self.grades()
+		self.assertIsNone(payload["message"], "the table should open on the DP alone")
+		self.assertTrue(payload["rows"], "no rows came back")
+		self.assertFalse(payload["has_final_marks"])
+
+	def test_no_final_mark_or_remark_leaves_the_server(self):
+		"""The one that matters: hiding a column is not withholding a mark."""
+		self.withhold_everything()
+		self.release(report.ISSUE_DATE_SEMESTER_MARK)
+
+		rows = self.grades()["rows"]
+		# Asserted before the loop: with no rows this passes without looking at
+		# anything, which is exactly what it did against the version of the
+		# endpoint that withheld the whole term.
+		self.assertTrue(rows, "no rows to check, so nothing was withheld or shown")
+		for row in rows:
+			self.assertEqual(row["final_mark"], NO_MARK, row["course"])
+			self.assertEqual(row["remark"], NO_MARK, row["course"])
+			self.assertEqual(row["supp_exam"], NO_MARK, row["course"])
+			self.assertEqual(row["supp_remark"], NO_MARK, row["course"])
+
+	def test_a_supplementary_cannot_be_out_while_the_exams_are_not(self):
+		"""It is a re-sit of an exam, so releasing it alone would publish a
+		result for a paper whose first sitting is still held back."""
+		self.withhold_everything()
+		self.release(report.ISSUE_DATE_SEMESTER_MARK)
+		self.release(report.ISSUE_DATE_SUPPLEMENTARY)
+
+		payload = self.grades()
+		self.assertTrue(payload["rows"], "no rows to check")
+		self.assertFalse(payload["has_supplementary"])
+		for row in payload["rows"]:
+			self.assertEqual(row["supp_exam"], NO_MARK, row["course"])
+
+	def test_the_full_release_still_shows_everything(self):
+		"""The control: the ordinary case must not have moved."""
+		self.withhold_everything()
+		self.release(report.ISSUE_DATE_STANDARD)
+
+		payload = self.grades()
+		self.assertTrue(payload["has_final_marks"])
+		self.assertTrue(payload["rows"])
+
+	def test_releasing_the_semester_mark_does_not_redate_the_printed_report(self):
+		"""`_issue_date_kinds` picks the Date of Issue stamped on the PDF. If the
+		new kind were one of them, publishing semester marks would redate every
+		student's report."""
+		doc = frappe._dict(
+			{
+				"student": self.case.student,
+				"academic_year": self.case.academic_year,
+				"academic_term": self.case.academic_term,
+			}
+		)
+		self.assertNotIn(report.ISSUE_DATE_SEMESTER_MARK, report._issue_date_kinds(doc))
 
 
 class TestTheGradesPageNamesModulesWithNoResults(IntegrationTestCase):
@@ -1098,6 +1233,7 @@ def run_tests(verbosity=2):
 		TestSheetsAndSittings,
 		TestLegacyFallbackShape,
 		TestEverySittingCanBeReleased,
+		TestTheSemesterMarkCanGoOutOnItsOwn,
 		TestTheGradesPageNamesModulesWithNoResults,
 		TestAMarkWithNoMaximumRecorded,
 		TestAnOptionalAssessmentNobodySat,

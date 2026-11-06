@@ -157,6 +157,57 @@ function return_for_correction(frm) {
 
 const ABSENT_INPUT = /^(a|abs|absent|-)$/i
 
+// Both grids are wider than the screen -- a course can carry eight assessments
+// and the QA view adds the totals and the comment -- so scrolling right takes
+// the student number and the name off the left edge and leaves a row of numbers
+// belonging to nobody. Holding the two identifying columns still is what makes
+// a mark on the right of the sheet readable.
+//
+// Addressed by position rather than by a class on every cell: both tables put
+// the number first and the name second, and the frozen columns are the two that
+// say who the row is about.
+const FROZEN_COLUMN = 96
+const FROZEN_STYLE_ID = 'ee-frozen-columns'
+
+function ensure_frozen_style() {
+	if (document.getElementById(FROZEN_STYLE_ID)) return
+
+	const style = document.createElement('style')
+	style.id = FROZEN_STYLE_ID
+	style.textContent = `
+		.ee-frozen th:nth-child(-n + 2),
+		.ee-frozen td:nth-child(-n + 2) {
+			position: sticky;
+			/* Opaque, or the marks scroll underneath and show through. */
+			background: var(--fg-color);
+		}
+		.ee-frozen th:nth-child(1),
+		.ee-frozen td:nth-child(1) {
+			left: 0;
+			width: ${FROZEN_COLUMN}px;
+			min-width: ${FROZEN_COLUMN}px;
+			max-width: ${FROZEN_COLUMN}px;
+		}
+		.ee-frozen th:nth-child(2),
+		.ee-frozen td:nth-child(2) {
+			left: ${FROZEN_COLUMN}px;
+			/* A collapsed border is painted by the cell that scrolls under this
+			   one, so the edge is drawn here instead and cannot be covered. */
+			box-shadow: 1px 0 0 var(--border-color);
+		}
+		.ee-frozen tbody td:nth-child(-n + 2) {
+			z-index: 2;
+		}
+		/* Above both the sticky header row and the sticky columns, since the two
+		   corner cells are part of each. */
+		.ee-frozen thead th:nth-child(-n + 2) {
+			top: 0;
+			z-index: 3;
+		}
+	`
+	document.head.appendChild(style)
+}
+
 function render_mark_entry(frm) {
 	const field = frm.get_field('mark_entry')
 	if (!field) return
@@ -246,6 +297,7 @@ function render_mark_entry(frm) {
 		})
 		.join('')
 
+	ensure_frozen_style()
 	$wrapper.html(
 		'<div class="mark-entry">' +
 			'<div class="flex justify-between align-center" style="margin-bottom:8px">' +
@@ -255,9 +307,9 @@ function render_mark_entry(frm) {
 				'</button>' +
 			'</div>' +
 			'<div style="overflow:auto;max-height:60vh;border:1px solid var(--border-color)">' +
-				'<table class="table table-bordered table-condensed" style="margin:0">' +
+				'<table class="table table-bordered table-condensed ee-frozen" style="margin:0">' +
 					'<thead style="position:sticky;top:0;background:var(--fg-color);z-index:1"><tr>' +
-						'<th style="min-width:96px">' + __('Student') + '</th>' +
+						'<th>' + __('Student') + '</th>' +
 						'<th style="min-width:180px">' + __('Name') + '</th>' +
 						header +
 					'</tr></thead>' +
@@ -477,7 +529,7 @@ function draw_qa_table(frm, $wrapper, data) {
 
 	const head = []
 		.concat(
-			['<th style="min-width:96px">' + __('Student') + '</th>'],
+			['<th>' + __('Student') + '</th>'],
 			['<th style="min-width:200px">' + __('Name') + '</th>'],
 			coursework.map((c) => '<th class="text-center">' + escape(c.assessment_group) + '</th>'),
 			['<th class="text-center">' + __('Semester Mark') + '</th>'],
@@ -539,7 +591,7 @@ function draw_qa_table(frm, $wrapper, data) {
 function draw_supplementary_table(frm, $wrapper, data, editable) {
 	const escape = frappe.utils.escape_html
 	const head =
-		'<th style="min-width:96px">' + __('Student') + '</th>' +
+		'<th>' + __('Student') + '</th>' +
 		'<th style="min-width:200px">' + __('Name') + '</th>' +
 		'<th class="text-center">' + __('Supplementary Mark') + '</th>' +
 		'<th class="text-center">' + __('Supp Remark') + '</th>'
@@ -582,6 +634,7 @@ function qa_shell(data, head, body, note) {
 	const commented = data.rows.filter((r) => r.remark || r.supp_remark).length
 	const outstanding = data.rows.filter((r) => r.missing && r.missing.length).length
 
+	ensure_frozen_style()
 	return (
 		'<div class="qa-review">' +
 			'<div class="text-muted small" style="margin-bottom:8px">' +
@@ -591,7 +644,7 @@ function qa_shell(data, head, body, note) {
 				(note ? ' &middot; ' + note : '') +
 			'</div>' +
 			'<div style="overflow:auto;max-height:60vh;border:1px solid var(--border-color)">' +
-				'<table class="table table-bordered table-condensed" style="margin:0">' +
+				'<table class="table table-bordered table-condensed ee-frozen" style="margin:0">' +
 					'<thead style="position:sticky;top:0;background:var(--fg-color);z-index:1"><tr>' +
 						head +
 					'</tr></thead><tbody>' + body + '</tbody>' +

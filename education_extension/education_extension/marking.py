@@ -760,21 +760,18 @@ def _course_remarks(course, academic_term, doctype, fieldname):
 
 
 def _student_names(by_student):
-	"""Surname first, the way a mark sheet is read. Built from the name fields
-	rather than by splitting the full name, which guesses wrong on a double
-	surname."""
-	names = {}
-	for row in frappe.get_all(
-		"Student",
-		fields=["name", "student_name", "first_name", "last_name"],
-		filters={"name": ["in", list(by_student)]},
-		limit_page_length=0,
-	):
-		if row.last_name and row.first_name:
-			names[row.name] = f"{row.last_name}, {row.first_name}"
-		else:
-			names[row.name] = row.student_name or row.name
-	return names
+	"""What to call each student, in the form Marking Settings asks for.
+
+	Surname first was hard-coded here, and the mark entry grid beside the QA
+	review showed the name as recorded, so the same class was named two ways on
+	one form. `display_names` is now the one home for it, and the middle name
+	travels with the first.
+	"""
+	from education_extension.education_extension.doctype.marking_settings.marking_settings import (
+		display_names,
+	)
+
+	return display_names(list(by_student))
 
 
 def final_marks(student, academic_year, academic_term):

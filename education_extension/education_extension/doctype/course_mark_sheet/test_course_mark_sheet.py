@@ -904,6 +904,56 @@ class TestThePrintedMarkSheet(FrappeTestCase):
 		for column in self.sheet.mark_grid()["assessments"]:
 			self.assertIn(column["assessment_group"], html)
 
+	def test_the_printed_names_are_the_ones_the_entry_grid_shows(self):
+		"""Both come from `student_names`, so the paper and the screen cannot
+		name the same class two ways -- which is what they used to do, the grid
+		reading the name as recorded and the review beside it surname first."""
+		grid = self.sheet.mark_grid()
+		names = self.sheet.student_names()
+
+		self.assertTrue(names, "no names came back")
+		for row in grid["rows"]:
+			self.assertEqual(row["student_name"], names[row["student"]], row["student"])
+
+	def test_the_printed_sheet_and_the_qa_review_agree_on_the_names(self):
+		grid = self.sheet.mark_grid()
+		review = {row["student"]: row["student_name"] for row in self.sheet.qa_review()["rows"]}
+
+		for row in grid["rows"]:
+			self.assertEqual(row["student_name"], review[row["student"]], row["student"])
+
+	def test_the_naming_setting_decides_what_is_printed(self):
+		"""Read on sight rather than frozen onto the entry rows when the sheet
+		was generated, so changing the setting does not mean regenerating."""
+		from education_extension.education_extension.doctype.marking_settings import (
+			marking_settings,
+		)
+
+		def named(display):
+			with patch.object(
+				marking_settings, "get_student_name_display", return_value=display
+			):
+				return {
+					row["student"]: row["student_name"]
+					for row in frappe.get_doc(
+						"Course Mark Sheet", self.sheet.name
+					).mark_grid()["rows"]
+				}
+
+		surname_first = named("Surname First")
+		as_recorded = named("As Recorded")
+
+		# Somebody on the sheet has both halves of a name, or neither form says
+		# anything and the test passes without showing that the setting is read.
+		self.assertTrue(
+			any(surname_first[student] != as_recorded[student] for student in surname_first),
+			"no student on this sheet is named differently by the two settings",
+		)
+		for student, name in as_recorded.items():
+			recorded = frappe.db.get_value("Student", student, "student_name")
+			if recorded:
+				self.assertEqual(name, " ".join(recorded.split()), student)
+
 	def test_a_mark_prints_as_it_was_awarded(self):
 		"""Rounding is for a percentage. This is the mark on the paper."""
 		doc = sheet_with([("S1", "Test 1", MARKED, 67.5, 0)])

@@ -314,7 +314,11 @@ function render_mark_entry(frm) {
 	const field = frm.get_field('mark_entry')
 	if (!field) return
 
-	const $wrapper = $(field.wrapper).empty()
+	// `.empty()` takes the cells away but leaves the delegated handlers bound to
+	// the wrapper itself, so every refresh used to add another set and a mark
+	// typed once was recorded twice over. Taken off by namespace rather than with
+	// a bare .off(), which would also unbind anything Frappe has put here.
+	const $wrapper = $(field.wrapper).empty().off('.ee-marks')
 	const entries = frm.doc.entries || []
 
 	if (!entries.length) {
@@ -326,6 +330,15 @@ function render_mark_entry(frm) {
 		return
 	}
 
+	// How a class is named is a Marking Settings question, so the names come from
+	// the server rather than off `entry.student_name`: that is the name as it was
+	// captured when the sheet was generated, and a setting about what is shown
+	// has to take effect on sight. The QA review below has always drawn this way.
+	frm.call('student_names').then((r) => draw_mark_entry(frm, $wrapper, r.message || {}))
+}
+
+function draw_mark_entry(frm, $wrapper, names) {
+	const entries = frm.doc.entries || []
 	const editable = ENTRY_STATES.includes(frm.doc.workflow_state) && frm.doc.docstatus === 0
 	const students = []
 	const assessments = []
@@ -333,7 +346,10 @@ function render_mark_entry(frm) {
 
 	for (const entry of entries) {
 		if (!students.some((student) => student.id === entry.student)) {
-			students.push({ id: entry.student, name: entry.student_name || entry.student })
+			students.push({
+				id: entry.student,
+				name: names[entry.student] || entry.student_name || entry.student,
+			})
 		}
 		if (!assessments.includes(entry.assessment_group)) assessments.push(entry.assessment_group)
 		cells[entry.student + '|' + entry.assessment_group] = entry
@@ -487,7 +503,7 @@ function render_mark_entry(frm) {
 		$save.prop('disabled', !editable || !changed.size)
 	}
 
-	$wrapper.on('change', '.mark-cell', function () {
+	$wrapper.on('change.ee-marks', '.mark-cell', function () {
 		const $input = $(this)
 		const parsed = parse_mark($input.val(), Number($input.attr('data-max')))
 
@@ -512,7 +528,7 @@ function render_mark_entry(frm) {
 
 	// Enter and the arrows move down the column, which is how a column of marks
 	// gets entered without reaching for the mouse.
-	$wrapper.on('keydown', '.mark-cell', function (event) {
+	$wrapper.on('keydown.ee-marks', '.mark-cell', function (event) {
 		let step = 0
 		if (event.key === 'Enter' || event.key === 'ArrowDown') step = 1
 		else if (event.key === 'ArrowUp') step = -1
@@ -622,7 +638,9 @@ function render_qa_review(frm) {
 	const field = frm.get_field('qa_review')
 	if (!field) return
 
-	const $wrapper = $(field.wrapper).empty()
+	// Namespaced off for the same reason the entry grid does it: the comment
+	// handler is delegated to this wrapper and `.empty()` leaves it bound.
+	const $wrapper = $(field.wrapper).empty().off('.ee-qa')
 	if (!REVIEW_STATES.includes(frm.doc.workflow_state)) {
 		$wrapper.html(
 			'<div class="text-muted" style="padding:12px 0">' +
@@ -784,7 +802,7 @@ function qa_shell(data, head, body, note) {
 }
 
 function bind_comment_links(frm, $wrapper, editable) {
-	$wrapper.on('click', '.qa-comment', function () {
+	$wrapper.on('click.ee-qa', '.qa-comment', function () {
 		if (!editable) return
 		edit_comment(frm, $(this).attr('data-student'), $(this).attr('data-supplementary') === '1')
 	})

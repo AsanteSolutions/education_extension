@@ -456,6 +456,25 @@ class CourseMarkSheet(Document):
 			for row in review["rows"]
 		}
 
+	@frappe.whitelist()
+	def student_names(self):
+		"""What to call each student on this sheet, as {id: name}.
+
+		Asked for rather than read off the entry rows: `student_name` on a row is
+		the name as it was captured when the sheet was generated, and how a class
+		is named is a Marking Settings question that has to take effect on sight
+		rather than when somebody next regenerates a sheet.
+
+		Whitelisted for the entry grid, which draws the names in the browser. The
+		list comes off the sheet and never from the caller, so this cannot be asked
+		about a student who is not on it.
+		"""
+		from education_extension.education_extension.doctype.marking_settings.marking_settings import (
+			display_names,
+		)
+
+		return display_names([entry.student for entry in self.entries])
+
 	def mark_grid(self):
 		"""The sheet laid out the way the entry grid lays it out, for printing.
 
@@ -483,6 +502,7 @@ class CourseMarkSheet(Document):
 		maximum = {}
 		rows = []
 		by_student = {}
+		names = self.student_names()
 
 		for entry in self.entries:
 			if entry.student not in by_student:
@@ -490,7 +510,7 @@ class CourseMarkSheet(Document):
 				rows.append(
 					{
 						"student": entry.student,
-						"student_name": entry.student_name or entry.student,
+						"student_name": names.get(entry.student, entry.student),
 						"cells": by_student[entry.student],
 					}
 				)

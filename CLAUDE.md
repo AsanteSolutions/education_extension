@@ -24,12 +24,15 @@ frappe.init(site="hrms.localhost"); frappe.connect(); frappe.set_user("Administr
 import importlib
 for name in ["test_academic_standing", "test_api", "test_dashboard", "test_desk",
              "test_marking", "test_patches", "test_progress_report",
-             "test_registration", "test_registration_forms"]:
+             "test_registration", "test_registration_forms",
+             "doctype.course_mark_sheet.test_course_mark_sheet",
+             "doctype.mark_change.test_mark_change",
+             "doctype.marking_settings.test_marking_settings"]:
     r = importlib.import_module("education_extension.education_extension." + name).run_tests(verbosity=0)
     print(name, r.testsRun, len(r.failures), len(r.errors))
 ```
 
-~331 tests, and they should all pass. Prefer this **plain-python runner over
+~443 tests, and they should all pass. Prefer this **plain-python runner over
 `bench console`**: the console runs each top-level statement as its own IPython
 cell, so a function or lambda defined in one cell cannot see names from another
 and you get spurious `NameError`s. Through the console, load the script with
@@ -114,6 +117,14 @@ containing `.bundle.`, so `registration_desk.js` needs **no `bench build`**.
   results, and has caused this bug three separate times.
 - **One home per constant.** `COURSEWORK` in `course_mark_scheme`, `SUPP_GROUP`
   in `student_progress_report`, the sittings in `marking`. Import, don't restate.
+- **How a class is ordered and how it is named are Marking Settings questions**,
+  answered by `order_students()` and `display_names()` and nowhere else. The QA
+  review named students surname-first while the entry grid beside it used the
+  name as recorded. Order is frozen onto the sheet when entries are generated;
+  the naming is read on sight, so changing it needs no regeneration. The one
+  deliberate exception is `registration_consent._surname_first` — the Proof of
+  Registration names a student the way that paper form does, without a comma,
+  and is not a mark grid.
 - **The reason for missing data is recorded, not guessed.** A module with no
   results is only mentioned to a student where a `Course Results Notice` exists.
 - **Students are confined by User Permissions** on Student

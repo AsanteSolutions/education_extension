@@ -8,7 +8,10 @@
  "field_order": [
   "section_break_students",
   "student_order",
-  "student_order_description"
+  "student_order_description",
+  "section_break_names",
+  "student_name_display",
+  "student_name_description"
  ],
  "fields": [
   {
@@ -29,13 +32,32 @@
    "fieldname": "student_order_description",
    "fieldtype": "HTML",
    "options": "<p class=\"text-muted small\">Changing this affects sheets that are generated or regenerated afterwards. To reorder a sheet that already exists, open it while it is still with the lecturer and use Generate Entries again — the marks already entered are kept.</p>"
+  },
+  {
+   "fieldname": "section_break_names",
+   "fieldtype": "Section Break",
+   "label": "Student Names"
+  },
+  {
+   "default": "Surname First",
+   "description": "How a student is named on the mark entry grid, the QA review, the Course Results report and the printed mark sheet.",
+   "fieldname": "student_name_display",
+   "fieldtype": "Select",
+   "label": "Show Student Names As",
+   "options": "Surname First\nAs Recorded",
+   "reqd": 1
+  },
+  {
+   "fieldname": "student_name_description",
+   "fieldtype": "HTML",
+   "options": "<p class=\"text-muted small\"><b>Surname First</b> reads <i>Mthembu, Nolwazi Khanyisa</i> — the surname, a comma, then the first and middle names. <b>As Recorded</b> shows the name as it was captured on the Student record. Unlike the order above, this changes only what is displayed: nothing needs regenerating, and a student with no surname on record is shown as recorded either way.</p>"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-08-28 09:00:00.000000",
+ "modified": "2026-11-09 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Education Extension",
  "name": "Marking Settings",

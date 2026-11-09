@@ -4,7 +4,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import now_datetime
+from frappe.utils import flt, formatdate, get_fullname, now_datetime, nowdate
 
 from education_extension.education_extension.doctype.student_progress_report.student_progress_report import (
 	SUPP_GROUP as SUPPLEMENTARY_GROUP,
@@ -22,10 +22,12 @@ from education_extension.education_extension.doctype.marking_settings.marking_se
 # The sittings a sheet can cover: the course as everyone sits it, and the two
 # re-sittings. Taken from `marking`, which is where `sitting_of` decides what a
 # mark counts towards -- a second spelling here is a second answer waiting to
-# disagree with it.
+# disagree with it. `NO_MARK` comes from there for the same reason: it is how a
+# mark that cannot be worked out is written everywhere a student reads one.
 from education_extension.education_extension.marking import (
 	AEGROTAT,
 	MAIN,
+	NO_MARK,
 	SUPPLEMENTARY,
 )
 
@@ -88,6 +90,15 @@ def moderated_value(raw_score, maximum, method, value):
 	"""
 	moderated = raw_score * value if method == MODERATION_LINEAR else raw_score + value
 	return max(0, min(maximum, moderated))
+
+
+def _full_name(user):
+	"""A person's name rather than the login that stands for them.
+
+	A User link holds an email address, and an email address on a signature
+	line is not who signed. Empty for a step nobody has taken yet.
+	"""
+	return get_fullname(user) if user else ""
 
 
 class CourseMarkSheet(Document):
@@ -444,6 +455,134 @@ class CourseMarkSheet(Document):
 			row["student"]: {"dp": row["dp"], "final_mark": row["final_mark"]}
 			for row in review["rows"]
 		}
+
+	def mark_grid(self):
+		"""The sheet laid out the way the entry grid lays it out, for printing.
+
+		A mark sheet is signed, filed and argued over on paper, and what is read
+		there has to be the grid the marks went into -- students down,
+		assessments across. The standard print format walks the child table
+		instead: on this site's seventy-student sheet it came out as 561 rows of
+		one mark each, 629KB, with the student number nowhere on it.
+
+		The rows come off the sheet in the order they are stored, which is the
+		order `get_students` put them in and the order the grid shows. Sorting
+		them again here would print a sheet that does not match the screen it
+		was checked against.
+
+		The DP and the final mark come from `mark_totals`, so the printed number
+		and the lecturer's number cannot be two different calculations -- the
+		weightings live in the course mark scheme and are read there once.
+
+		Everything the format prints is assembled here rather than in the
+		template, the way Proof of Registration does it: the template stays
+		declarative, and what a signed mark sheet says can be checked without
+		rendering anything.
+		"""
+		assessments = []
+		maximum = {}
+		rows = []
+		by_student = {}
+
+		for entry in self.entries:
+			if entry.student not in by_student:
+				by_student[entry.student] = {}
+				rows.append(
+					{
+						"student": entry.student,
+						"student_name": entry.student_name or entry.student,
+						"cells": by_student[entry.student],
+					}
+				)
+			if entry.assessment_group not in maximum:
+				assessments.append(entry.assessment_group)
+			# Headed with the largest rather than with whichever row came first:
+			# the maximum belongs to the entry, and nothing on the sheet says two
+			# students sat one assessment out of the same total.
+			maximum[entry.assessment_group] = max(
+				maximum.get(entry.assessment_group, 0), entry.maximum_score or 100
+			)
+			by_student[entry.student][entry.assessment_group] = entry
+
+		# A failed total is not a reason to refuse to print the marks, but it
+		# must not read as a student with nothing entered either -- the same
+		# reasoning as the entry grid, which shows "?" rather than a dash.
+		totals = {}
+		totals_failed = False
+		if self.sitting != SUPPLEMENTARY:
+			try:
+				totals = self.mark_totals()
+			except Exception:
+				frappe.log_error(title=f"Mark grid totals: {self.name}")
+				totals_failed = True
+
+		for row in rows:
+			cells = row.pop("cells")
+			row["cells"] = [
+				self.printed_mark(cells.get(assessment)) for assessment in assessments
+			]
+			total = totals.get(row["student"]) or {}
+			row["dp"] = "?" if totals_failed else total.get("dp", NO_MARK)
+			row["final_mark"] = "?" if totals_failed else total.get("final_mark", NO_MARK)
+
+		return {
+			"assessments": [
+				{"assessment_group": assessment, "out_of": f"{maximum[assessment]:g}"}
+				for assessment in assessments
+			],
+			# A supplementary sheet is one paper standing in for an exam, not a
+			# course, so it has no semester or final mark of its own -- the same
+			# rule the entry grid and `mark_totals` go by.
+			"totals_apply": self.sitting != SUPPLEMENTARY,
+			"totals_failed": totals_failed,
+			"rows": rows,
+			"entered": len(self.entries) - self.outstanding_count(),
+			"outstanding": self.outstanding_count(),
+			"printed_on": formatdate(nowdate(), "yyyy MMMM d"),
+			# The adjustment, where one stands. Asked the way `effective_score`
+			# asks it, so the sheet cannot print as moderated while the marks
+			# are being read as raw, or the other way about.
+			"moderation": (
+				{
+					"method": self.moderation_method,
+					"value": f"{flt(self.moderation_value):g}",
+					"by": _full_name(self.moderated_by),
+					"reason": self.moderation_reason or "",
+				}
+				if self.moderation_method in (MODERATION_LINEAR, MODERATION_FLAT)
+				else None
+			),
+			"semester_mark_approved_by": _full_name(self.semester_mark_approved_by),
+			# Who has handled the sheet so far, for the strip it gets signed on.
+			# Named from the trail rather than left blank, so a sheet that has
+			# already been checked prints as one -- and a step nobody has taken
+			# yet prints an empty line to sign, which is the point of printing it.
+			"signatories": [
+				{"role": _("Lecturer"), "name": _full_name(self.entered_by)},
+				{"role": _("Checked By"), "name": _full_name(self.checked_by)},
+				{"role": _("Approved By"), "name": _full_name(self.approved_by)},
+			],
+		}
+
+	@staticmethod
+	def printed_mark(entry):
+		"""One cell of the printed grid: the mark as it was entered.
+
+		`None` where the sheet has no row at all, which is not the same as a row
+		with no mark yet. A re-sitting carries only the papers being sat again,
+		so the difference is a cell nobody can fill against a cell waiting to be
+		filled -- and on paper, an empty box is somewhere to write.
+		"""
+		if entry is None:
+			return {"status": None, "text": ""}
+		if entry.status == ABSENT:
+			return {"status": ABSENT, "text": "A"}
+		if entry.status == MARKED:
+			# `:g` rather than `round_half_up`: this is the mark as awarded, and
+			# a half mark that was entered should print as one. It drops the
+			# trailing zero a Float carries, so 50.0 prints as 50.
+			return {"status": MARKED, "text": f"{flt(entry.raw_score):g}"}
+		return {"status": NOT_MARKED, "text": ""}
 
 	@frappe.whitelist()
 	def save_marks(self, changes):

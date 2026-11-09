@@ -74,7 +74,7 @@ education_extension/
     api.py                      # portal session -> Student
     testing.py                  # test skip helpers
     test_*.py                   # the runnable suites
-    doctype/ report/ page/ workspace/
+    doctype/ report/ page/ workspace/ print_format/
   patches/                      # listed in patches.txt, run once per site
   public/js/registration_desk.js  # shared desk script (app_include_js)
 frontend/                       # Vue 3 + frappe-ui student portal
@@ -142,6 +142,12 @@ containing `.bundle.`, so `registration_desk.js` needs **no `bench build`**.
 - Frappe records patches as already run on a **fresh install**, so a one-shot
   patch never fires there — put anything that must happen on both in
   `after_install` and `after_migrate`.
+- A `frappe.db.set_value` on a **standard record** (Print Format, DocType)
+  outlives `frappe.db.rollback()`, and `reload_doc` will not undo it: the
+  importer skips a file whose `modified` is older than the row. Put it back with
+  `import_file_by_path(frappe.get_app_path(...), force=True)`. Found by
+  neutralising a print format to prove its test bit, which left the dev site
+  rendering the broken template.
 
 ---
 
@@ -160,7 +166,7 @@ Changes here are expected to come with evidence, not just passing tests:
 
 ## Deploying
 
-- `bench migrate` for new doctypes and patches.
+- `bench migrate` for new doctypes, print formats and patches.
 - `cd frontend && yarn build` for any portal change (assets are gitignored).
 - No `bench build` needed for the desk script.
 

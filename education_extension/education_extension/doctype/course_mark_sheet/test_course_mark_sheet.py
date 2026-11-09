@@ -798,6 +798,173 @@ class TestCorrectingAMarkSchemeAfterMarkingHasStarted(FrappeTestCase):
 			self.sheet.restamp_scheme()
 
 
+class TestThePrintedMarkSheet(FrappeTestCase):
+	"""The sheet on paper, laid out the way it was marked.
+
+	The standard print format walks the child table: on a course of seventy
+	students across eight assessments it prints 561 rows of one mark each,
+	629KB, and the student number does not appear on it anywhere. Nobody can
+	check, sign or file that. The printed grid is the entry grid -- students
+	down, assessments across -- and it reads its totals from `mark_totals`, so
+	the paper and the screen cannot come to different numbers.
+	"""
+
+	PRINT_FORMAT = "Course Mark Sheet Grid"
+
+	def setUp(self):
+		sheets = frappe.get_all(
+			"Course Mark Sheet",
+			filters={"sitting": "Main"},
+			pluck="name",
+			order_by="creation desc",
+		)
+		# More than one of each, because a sheet with a single student and a
+		# single assessment is not a grid and would let the shape tests pass
+		# without showing anything.
+		self.sheet = None
+		for name in sheets:
+			doc = frappe.get_doc("Course Mark Sheet", name)
+			if (
+				any(entry.status == MARKED for entry in doc.entries)
+				and len({entry.student for entry in doc.entries}) > 1
+				and len({entry.assessment_group for entry in doc.entries}) > 1
+			):
+				self.sheet = doc
+				break
+		if not self.sheet:
+			self.skipTest("this site has no marked main sheet with marks across a grid")
+
+	def tearDown(self):
+		frappe.db.rollback()
+
+	def test_a_row_per_student_and_a_column_per_assessment(self):
+		"""The shape, which is the whole point of printing it this way."""
+		grid = self.sheet.mark_grid()
+		students = {entry.student for entry in self.sheet.entries}
+		assessments = {entry.assessment_group for entry in self.sheet.entries}
+
+		self.assertTrue(len(students) > 1 and len(assessments) > 1, "not a grid")
+		self.assertEqual(len(grid["rows"]), len(students))
+		self.assertEqual(
+			{column["assessment_group"] for column in grid["assessments"]}, assessments
+		)
+		for row in grid["rows"]:
+			self.assertEqual(len(row["cells"]), len(grid["assessments"]), row["student"])
+
+	def test_the_rows_are_in_the_order_the_grid_shows_them(self):
+		"""A printed sheet that is sorted differently from the screen it was
+		checked against is a second sheet, not a copy of this one."""
+		grid = self.sheet.mark_grid()
+
+		on_screen = []
+		for entry in self.sheet.entries:
+			if entry.student not in on_screen:
+				on_screen.append(entry.student)
+
+		self.assertEqual([row["student"] for row in grid["rows"]], on_screen)
+
+	def test_the_printed_totals_are_the_ones_qa_will_read(self):
+		"""Read from `mark_totals` rather than worked out again. The weightings
+		live in the course mark scheme, and a second copy of them is how the
+		portal's grades page came to disagree with the printed report."""
+		grid = self.sheet.mark_grid()
+		totals = self.sheet.mark_totals()
+
+		self.assertFalse(grid["totals_failed"], "the totals could not be worked out")
+		self.assertTrue(totals, "no totals came back")
+		for row in grid["rows"]:
+			self.assertEqual(row["dp"], totals[row["student"]]["dp"], row["student"])
+			self.assertEqual(
+				row["final_mark"], totals[row["student"]]["final_mark"], row["student"]
+			)
+
+	def test_a_supplementary_sheet_prints_no_course_total(self):
+		"""One paper standing in for an exam is not a course mark."""
+		name = frappe.db.get_value("Course Mark Sheet", {"sitting": "Supplementary"}, "name")
+		if not name:
+			self.skipTest("this site has no supplementary sheet")
+
+		grid = frappe.get_doc("Course Mark Sheet", name).mark_grid()
+		self.assertFalse(grid["totals_apply"])
+
+	def test_the_format_prints_every_student_on_the_sheet(self):
+		"""Rendered through Frappe, not read out of the dict: a template that
+		loops over the wrong name prints a sheet with no marks on it and raises
+		nothing at all."""
+		if not frappe.db.exists("Print Format", self.PRINT_FORMAT):
+			self.skipTest("the print format is not installed on this site")
+
+		html = frappe.get_print(
+			"Course Mark Sheet", self.sheet.name, print_format=self.PRINT_FORMAT
+		)
+
+		self.assertIn("COURSE MARK SHEET", html)
+		for row in self.sheet.mark_grid()["rows"]:
+			self.assertIn(row["student"], html)
+		for column in self.sheet.mark_grid()["assessments"]:
+			self.assertIn(column["assessment_group"], html)
+
+	def test_a_mark_prints_as_it_was_awarded(self):
+		"""Rounding is for a percentage. This is the mark on the paper."""
+		doc = sheet_with([("S1", "Test 1", MARKED, 67.5, 0)])
+		self.assertEqual(doc.printed_mark(doc.entries[0])["text"], "67.5")
+
+	def test_a_whole_mark_does_not_print_its_decimal(self):
+		doc = sheet_with([("S1", "Test 1", MARKED, 50, 0)])
+		self.assertEqual(doc.printed_mark(doc.entries[0])["text"], "50")
+
+	def test_a_zero_prints_as_a_zero(self):
+		"""Zero is a mark, and an empty box on a mark sheet is not."""
+		doc = sheet_with([("S1", "Test 1", MARKED, 0, 0)])
+		self.assertEqual(doc.printed_mark(doc.entries[0])["text"], "0")
+
+	def test_an_absence_prints_as_an_absence(self):
+		doc = sheet_with([("S1", "Test 1", ABSENT, 0, 0)])
+		self.assertEqual(doc.printed_mark(doc.entries[0])["text"], "A")
+
+	def test_an_unmarked_cell_prints_as_an_empty_box(self):
+		doc = sheet_with([("S1", "Test 1", NOT_MARKED, 0, 0)])
+		cell = doc.printed_mark(doc.entries[0])
+		self.assertEqual(cell["text"], "")
+		self.assertEqual(cell["status"], NOT_MARKED)
+
+	def test_a_cell_the_sheet_has_no_row_for_is_not_an_unmarked_one(self):
+		"""A re-sitting carries only the papers being sat again. A cell nobody
+		can fill has to look different from one that is waiting to be filled,
+		or an aegrotat sheet prints as a sheet somebody forgot to finish."""
+		doc = sheet_with([("S1", "Test 1", MARKED, 60, 0)])
+		self.assertIsNone(doc.printed_mark(None)["status"])
+		self.assertEqual(doc.printed_mark(doc.entries[0])["status"], MARKED)
+
+	def test_the_adjustment_is_stated_where_moderation_stands(self):
+		"""The cells hold the mark as awarded, so a DP the raw marks do not add
+		up to is owed its reason on the same page."""
+		doc = sheet_with(
+			[("S1", "Test 1", MARKED, 60, 65)], moderation_method=MODERATION_FLAT
+		)
+		doc.moderation_value = 5
+		doc.moderation_reason = "The paper was long."
+
+		self.assertEqual(doc.mark_grid()["moderation"]["value"], "5")
+		self.assertEqual(doc.mark_grid()["moderation"]["reason"], "The paper was long.")
+
+	def test_nothing_is_stated_where_no_moderation_stands(self):
+		doc = sheet_with([("S1", "Test 1", MARKED, 60, 0)])
+		self.assertIsNone(doc.mark_grid()["moderation"])
+
+	def test_a_total_that_cannot_be_worked_out_says_so(self):
+		"""A dash is what an unmarked student shows, so a failure that printed
+		one would read as "no marks yet" and be invisible. The entry grid shows
+		a question mark for the same reason."""
+		doc = sheet_with([("S1", "Test 1", MARKED, 60, 0)])
+		# No scheme and no course behind it, so the totals cannot be reached.
+		grid = doc.mark_grid()
+
+		self.assertTrue(grid["totals_failed"])
+		self.assertEqual(grid["rows"][0]["dp"], "?")
+		self.assertEqual(grid["rows"][0]["final_mark"], "?")
+
+
 def run_tests(verbosity=2):
 	"""Run these from a console, since bench run-tests cannot bootstrap this site.
 
@@ -815,6 +982,7 @@ def run_tests(verbosity=2):
 		TestTheEntryGridShowsWhatTheMarksComeTo,
 		TestSigningOffTheSemesterMark,
 		TestCorrectingAMarkSchemeAfterMarkingHasStarted,
+		TestThePrintedMarkSheet,
 	):
 		suite.addTests(loader.loadTestsFromTestCase(case))
 	return unittest.TextTestRunner(verbosity=verbosity).run(suite)

@@ -4,6 +4,31 @@
 const ENTRY_STATES = ['Awaiting Entry', 'In Entry']
 const MODERATION_STATES = ['Checked', 'Moderated']
 
+// A method of the sheet, run against the stored sheet rather than against the
+// browser's copy of it.
+//
+// `frm.call` posts the whole client-side document, and the server refuses it
+// unless its timestamp still matches the database. Saving marks bumps that
+// timestamp, and the `reload_doc` that follows takes the document out of
+// `locals` while it fetches the new one, so the debounced totals call kept
+// landing in that window and failing two ways: "has been modified after you
+// have opened it" against the sheet the save had just bumped, or, once the
+// document was gone from `locals`, nothing to send at all -- jQuery drops the
+// undefined key and the server is asked to run the method on no document.
+//
+// None of these methods reads anything off the form. The cells typed but not
+// saved travel in `changes`, so the name is all the server needs, and the marks
+// go onto the sheet as it stands rather than onto a copy the browser took some
+// time ago. Two lecturers entering different columns now both land.
+function sheet_call(frm, method, args) {
+	return frappe.xcall('run_doc_method', {
+		dt: frm.doctype,
+		dn: frm.docname,
+		method: method,
+		args: args || {},
+	})
+}
+
 frappe.ui.form.on('Course Mark Sheet', {
 	refresh: function (frm) {
 		if (frm.is_new()) return
@@ -68,10 +93,10 @@ function show_progress(frm) {
 }
 
 function generate_entries(frm) {
-	frm.call('generate_entries').then((r) => {
-		if (!r.message) return
+	sheet_call(frm, 'generate_entries').then((done) => {
+		if (!done) return
 		frappe.show_alert({
-			message: __('{0} students, {1} marks to enter', [r.message.students, r.message.entries]),
+			message: __('{0} students, {1} marks to enter', [done.students, done.entries]),
 			indicator: 'green',
 		})
 		frm.reload_doc()
@@ -84,8 +109,7 @@ function generate_entries(frm) {
 // when the two have actually parted company, and only with what it costs said
 // in advance -- an assessment the scheme has dropped takes its marks with it.
 function offer_scheme_update(frm) {
-	frm.call('scheme_change').then((r) => {
-		const change = r && r.message
+	sheet_call(frm, 'scheme_change').then((change) => {
 		if (!change) return
 
 		frm.dashboard.add_indicator(__('Mark scheme has been corrected'), 'orange')
@@ -111,8 +135,7 @@ function offer_scheme_update(frm) {
 			lines.push(__('Every other mark is kept.'))
 
 			frappe.confirm(lines.join('<br>'), () => {
-				frm.call('restamp_scheme').then((res) => {
-					const done = res && res.message
+				sheet_call(frm, 'restamp_scheme').then((done) => {
 					frappe.show_alert({
 						message: __('Now marking against {0}', [done.current]),
 						indicator: 'green',
@@ -142,7 +165,7 @@ function approve_semester_mark(frm) {
 			'Sign off the semester mark? Students will see it once the Semester Mark release date for this term has passed. The exam marks are not included and still need the sheet approved.',
 		),
 		() => {
-			frm.call('approve_semester_mark').then(() => {
+			sheet_call(frm, 'approve_semester_mark').then(() => {
 				frappe.show_alert({ message: __('Semester mark signed off'), indicator: 'green' })
 				frm.reload_doc()
 			})
@@ -152,7 +175,7 @@ function approve_semester_mark(frm) {
 
 function withdraw_semester_mark(frm) {
 	frappe.confirm(__('Take the semester mark back from students?'), () => {
-		frm.call('withdraw_semester_mark').then(() => {
+		sheet_call(frm, 'withdraw_semester_mark').then(() => {
 			frappe.show_alert({ message: __('Semester mark withdrawn'), indicator: 'orange' })
 			frm.reload_doc()
 		})
@@ -191,14 +214,14 @@ function moderate(frm) {
 		],
 		primary_action_label: __('Apply'),
 		primary_action: (values) => {
-			frm.call('apply_moderation', values).then((r) => {
+			sheet_call(frm, 'apply_moderation', values).then((done) => {
 				dialog.hide()
-				if (r.message && r.message.adjusted) {
+				if (done && done.adjusted) {
 					frappe.show_alert({
 						message: __('{0} marks adjusted, average {1} to {2}', [
-							r.message.adjusted,
-							r.message.average_before.toFixed(1),
-							r.message.average_after.toFixed(1),
+							done.adjusted,
+							done.average_before.toFixed(1),
+							done.average_after.toFixed(1),
 						]),
 						indicator: 'green',
 					})
@@ -212,7 +235,7 @@ function moderate(frm) {
 
 function clear_moderation(frm) {
 	frappe.confirm(__('Put the raw marks back?'), () => {
-		frm.call('clear_moderation').then(() => frm.reload_doc())
+		sheet_call(frm, 'clear_moderation').then(() => frm.reload_doc())
 	})
 }
 
@@ -334,7 +357,7 @@ function render_mark_entry(frm) {
 	// the server rather than off `entry.student_name`: that is the name as it was
 	// captured when the sheet was generated, and a setting about what is shown
 	// has to take effect on sight. The QA review below has always drawn this way.
-	frm.call('student_names').then((r) => draw_mark_entry(frm, $wrapper, r.message || {}))
+	sheet_call(frm, 'student_names').then((names) => draw_mark_entry(frm, $wrapper, names || {}))
 }
 
 function draw_mark_entry(frm, $wrapper, names) {
@@ -457,10 +480,9 @@ function draw_mark_entry(frm, $wrapper, names) {
 		if (!totals_apply) return
 		clearTimeout(totals_pending)
 		totals_pending = setTimeout(() => {
-			frm
-				.call('mark_totals', { changes: [...changed.values()] })
-				.then((r) => {
-					const totals = (r && r.message) || {}
+			sheet_call(frm, 'mark_totals', { changes: [...changed.values()] })
+				.then((message) => {
+					const totals = message || {}
 					totals_failed = false
 					$wrapper.find('.total-cell').each(function () {
 						const $cell = $(this)
@@ -545,27 +567,33 @@ function draw_mark_entry(frm, $wrapper, names) {
 	$save.on('click', () => {
 		if (!changed.size) return
 		$save.prop('disabled', true)
-		frm
-			.call('save_marks', { changes: [...changed.values()] })
-			.then((r) => {
+
+		// The totals call waiting on the last keystroke is about to be answered
+		// by the save's own refresh, and letting it go would leave two requests
+		// racing to paint the same cells -- the older one sometimes landing last
+		// and putting the totals back to what they were before the save.
+		clearTimeout(totals_pending)
+
+		sheet_call(frm, 'save_marks', { changes: [...changed.values()] })
+			.then((done) => {
 				changed.clear()
 				refresh_totals()
-				if (r.message && r.message.ignored) {
+				if (done && done.ignored) {
 					frappe.msgprint({
 						title: __('Some marks were not saved'),
 						message: __(
 							'{0} of {1} changes did not match a row on this sheet and were ignored.',
-							[r.message.ignored, r.message.ignored + r.message.applied],
+							[done.ignored, done.ignored + done.applied],
 						),
 						indicator: 'red',
 					})
-				} else if (r.message) {
+				} else if (done) {
 					frappe.show_alert({
 						message: __('{0} saved, {1} still to enter', [
-							r.message.applied,
-							r.message.outstanding,
+							done.applied,
+							done.outstanding,
 						]),
-						indicator: r.message.outstanding ? 'orange' : 'green',
+						indicator: done.outstanding ? 'orange' : 'green',
 					})
 				}
 				// Said out loud rather than left to be noticed. The adjustment
@@ -575,7 +603,7 @@ function draw_mark_entry(frm, $wrapper, names) {
 				// Same reasoning as the moderation notice below: a student may
 				// already have seen this semester mark, so it going away is not
 				// something to discover later.
-				if (r.message && r.message.semester_mark_withdrawn) {
+				if (done && done.semester_mark_withdrawn) {
 					frappe.msgprint({
 						title: __('Semester mark withdrawn'),
 						message: __(
@@ -584,7 +612,7 @@ function draw_mark_entry(frm, $wrapper, names) {
 						indicator: 'orange',
 					})
 				}
-				if (r.message && r.message.moderation_withdrawn) {
+				if (done && done.moderation_withdrawn) {
 					frappe.msgprint({
 						title: __('Moderation removed'),
 						message: __(
@@ -650,9 +678,9 @@ function render_qa_review(frm) {
 		return
 	}
 
-	frm.call('qa_review').then((r) => {
-		if (!r.message) return
-		draw_qa_table(frm, $wrapper, r.message)
+	sheet_call(frm, 'qa_review').then((review) => {
+		if (!review) return
+		draw_qa_table(frm, $wrapper, review)
 	})
 }
 

@@ -1,10 +1,12 @@
 # Copyright (c) 2026, Asante Solutions and contributors
 # For license information, please see license.txt
 
+import json
 import unittest
 from unittest.mock import patch
 
 import frappe
+from frappe.handler import run_doc_method
 from frappe.tests.utils import FrappeTestCase
 
 from education_extension.education_extension.doctype.course_mark_sheet.course_mark_sheet import (
@@ -1015,6 +1017,113 @@ class TestThePrintedMarkSheet(FrappeTestCase):
 		self.assertEqual(grid["rows"][0]["final_mark"], "?")
 
 
+class TestTheGridAsksForTheSheetByName(FrappeTestCase):
+	"""Save Marks failed two ways, and both came from how the call was made.
+
+	`frm.call` posts the browser's whole copy of the document, and the server
+	refuses it unless its timestamp still matches the database -- which saving
+	marks has just moved. Then `reload_doc` takes the document out of `locals`
+	while it fetches the new one, and the debounced totals call that lands in
+	that window has no copy to post at all: the key is dropped and the server is
+	asked to run the method on nothing, which is the "first non keyword argument
+	must be a string or dict" that came back from `frappe.get_doc(None)`.
+
+	The grid now sends the name instead, the way the framework's own preview
+	fields do. These run the methods through that same door.
+	"""
+
+	def setUp(self):
+		sheets = frappe.get_all(
+			"Course Mark Sheet",
+			filters={"sitting": "Main", "workflow_state": ["in", (AWAITING_ENTRY, IN_ENTRY)]},
+			pluck="name",
+			order_by="creation desc",
+		)
+		self.sheet = None
+		for name in sheets:
+			doc = frappe.get_doc("Course Mark Sheet", name)
+			if len(doc.entries) > 1:
+				self.sheet = doc
+				break
+		if not self.sheet:
+			self.skipTest("this site has no sheet still with the lecturer")
+
+		# `run_doc_method` is written for a request and reads the HTTP method off
+		# one. There is no request here, so it is stood up rather than faked
+		# further in: the point of these tests is the real dispatch.
+		self.had_request = hasattr(frappe.local, "request")
+		self.request = getattr(frappe.local, "request", None)
+		frappe.local.request = frappe._dict({"method": "POST"})
+
+	def tearDown(self):
+		frappe.db.rollback()
+		if self.had_request:
+			frappe.local.request = self.request
+		else:
+			del frappe.local.request
+
+	def by_name(self, method, args=None):
+		"""What `sheet_call` sends: the name, and nothing off the form."""
+		frappe.local.response = frappe._dict({"docs": []})
+		run_doc_method(
+			method=method,
+			dt="Course Mark Sheet",
+			dn=self.sheet.name,
+			args=json.dumps(args or {}),
+		)
+		return frappe.local.response.get("message")
+
+	def by_posting_a_copy(self, copy, method, args=None):
+		"""What `frm.call` used to send: the document as the browser holds it."""
+		frappe.local.response = frappe._dict({"docs": []})
+		run_doc_method(method=method, docs=copy, args=json.dumps(args or {}))
+		return frappe.local.response.get("message")
+
+	def mark(self, entry, score):
+		return {
+			"student": entry.student,
+			"assessment_group": entry.assessment_group,
+			"status": MARKED,
+			"raw_score": score,
+		}
+
+	def test_every_method_the_grid_calls_runs_from_the_name_alone(self):
+		"""One test for the lot, because the dispatch is what is being checked:
+		a method with no arguments and one with arguments go different ways
+		through `run_doc_method`."""
+		self.assertTrue(self.by_name("student_names"), "no names came back")
+		self.assertIn("rows", self.by_name("qa_review") or {}, "no review came back")
+
+		totals = self.by_name("mark_totals", {"changes": [self.mark(self.sheet.entries[0], 5)]})
+		self.assertIsInstance(totals, dict, "no totals came back")
+
+	def test_a_mark_saves_after_the_browsers_copy_has_gone_behind(self):
+		"""The reported failure, end to end: the first save moves the timestamp,
+		and the second one used to be refused because the browser was still
+		holding the sheet as it was before the first."""
+		first, second = self.sheet.entries[0], self.sheet.entries[1]
+		copy = frappe.get_doc("Course Mark Sheet", self.sheet.name).as_json()
+
+		self.by_name("save_marks", {"changes": [self.mark(first, 5)]})
+
+		with self.assertRaises(frappe.TimestampMismatchError):
+			self.by_posting_a_copy(copy, "save_marks", {"changes": [self.mark(second, 6)]})
+
+		self.by_name("save_marks", {"changes": [self.mark(second, 6)]})
+
+		self.assertEqual(frappe.db.get_value("Course Mark Sheet Entry", first.name, "raw_score"), 5)
+		self.assertEqual(frappe.db.get_value("Course Mark Sheet Entry", second.name, "raw_score"), 6)
+
+	def test_a_sheet_the_browser_is_not_holding_can_still_be_asked_about(self):
+		"""`reload_doc` empties `locals` before it fetches, so for as long as the
+		fetch takes there is nothing to post. The totals call landed in that
+		window and came back as a `ValueError` from deep inside the framework."""
+		with self.assertRaises(ValueError):
+			self.by_posting_a_copy(None, "mark_totals", {"changes": []})
+
+		self.assertIsInstance(self.by_name("mark_totals", {"changes": []}), dict)
+
+
 def run_tests(verbosity=2):
 	"""Run these from a console, since bench run-tests cannot bootstrap this site.
 
@@ -1033,6 +1142,7 @@ def run_tests(verbosity=2):
 		TestSigningOffTheSemesterMark,
 		TestCorrectingAMarkSchemeAfterMarkingHasStarted,
 		TestThePrintedMarkSheet,
+		TestTheGridAsksForTheSheetByName,
 	):
 		suite.addTests(loader.loadTestsFromTestCase(case))
 	return unittest.TextTestRunner(verbosity=verbosity).run(suite)

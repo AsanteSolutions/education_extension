@@ -32,7 +32,7 @@ for name in ["test_academic_standing", "test_api", "test_dashboard", "test_desk"
     print(name, r.testsRun, len(r.failures), len(r.errors))
 ```
 
-~443 tests, and they should all pass. Prefer this **plain-python runner over
+~446 tests, and they should all pass. Prefer this **plain-python runner over
 `bench console`**: the console runs each top-level statement as its own IPython
 cell, so a function or lambda defined in one cell cannot see names from another
 and you get spurious `NameError`s. Through the console, load the script with
@@ -153,6 +153,15 @@ containing `.bundle.`, so `registration_desk.js` needs **no `bench build`**.
 - Frappe records patches as already run on a **fresh install**, so a one-shot
   patch never fires there — put anything that must happen on both in
   `after_install` and `after_migrate`.
+- **`frm.call` posts the browser's copy of the document**, and the server
+  refuses it unless its timestamp still matches the database. A call made while
+  a save or a `reload_doc` is in flight therefore fails one of two ways: "has
+  been modified after you have opened it", or — once `reload_doc` has emptied
+  `locals` and there is nothing left to post — `ValueError: First non keyword
+  argument must be a string or dict`. A method that works on the **stored**
+  record should be asked for by name instead:
+  `frappe.xcall('run_doc_method', {dt, dn, method, args})`, as `sheet_call()` in
+  `course_mark_sheet.js` does.
 - A `frappe.db.set_value` on a **standard record** (Print Format, DocType)
   outlives `frappe.db.rollback()`, and `reload_doc` will not undo it: the
   importer skips a file whose `modified` is older than the row. Put it back with

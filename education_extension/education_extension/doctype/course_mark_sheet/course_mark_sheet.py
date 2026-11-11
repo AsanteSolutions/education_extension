@@ -82,6 +82,16 @@ def entry_key(student, assessment_group):
 	return (str(student), str(assessment_group))
 
 
+def _mark_of(entry):
+	"""What a cell holds, for telling whether a save changed it.
+
+	The score only counts where there is a mark: an absent or unmarked cell is
+	saved with zero, and one carrying an older stray score is not a different
+	mark for losing it.
+	"""
+	return (entry.status, flt(entry.raw_score) if entry.status == MARKED else None)
+
+
 def moderated_value(raw_score, maximum, method, value):
 	"""A moderated mark, held inside the possible range.
 
@@ -619,19 +629,26 @@ class CourseMarkSheet(Document):
 		if isinstance(changes, str):
 			changes = frappe.parse_json(changes)
 
-		applied, ignored = self._apply_changes(changes)
-
 		# A signed-off semester mark is a published number: a student may already
 		# have seen it. Changing a coursework mark underneath it takes the
 		# signature off, the way a moderation comes off below, so the DP a
 		# student was shown is never quietly replaced by a different one.
+		#
+		# Judged by what the coursework holds afterwards, not by which cells were
+		# posted. The grid sends any cell that fired a change, and one typed over
+		# and put back still arrives -- so a batch of exam marks carrying a
+		# coursework cell at its old value took the DP away from students while
+		# saying a coursework mark had changed, when none had.
 		components = self.assessment_components()
-		touched_coursework = any(
-			components.get(change.get("assessment_group")) == COURSEWORK for change in changes
-		)
-		semester_mark_withdrawn = bool(
-			applied and touched_coursework and self.semester_mark_approved
-		)
+		coursework = [
+			entry for entry in self.entries if components.get(entry.assessment_group) == COURSEWORK
+		]
+		before = [_mark_of(entry) for entry in coursework]
+
+		applied, ignored = self._apply_changes(changes)
+
+		coursework_changed = before != [_mark_of(entry) for entry in coursework]
+		semester_mark_withdrawn = bool(coursework_changed and self.semester_mark_approved)
 		if semester_mark_withdrawn:
 			self._clear_semester_mark_approval()
 

@@ -633,6 +633,63 @@ class TestSigningOffTheSemesterMark(FrappeTestCase):
 		self.assertFalse(self.sheet.semester_mark_approved)
 		self.assertEqual(self.seen_by_students(), set(), "the marks stayed visible")
 
+	def entry_of(self, component):
+		return next(
+			e for e in self.sheet.entries if self.components.get(e.assessment_group) == component
+		)
+
+	def test_entering_exam_marks_leaves_it_on(self):
+		"""The signature is given so students can see the DP while the exams are
+		marked. Marking them is not a reason to take it away."""
+		self.sheet.approve_semester_mark()
+		exam = self.entry_of("Examination")
+
+		self.sheet.workflow_state = "In Entry"
+		result = self.sheet.save_marks(
+			[
+				{
+					"student": exam.student,
+					"assessment_group": exam.assessment_group,
+					"status": "Marked",
+					"raw_score": 1,
+				}
+			]
+		)
+
+		self.assertFalse(result["semester_mark_withdrawn"])
+		self.sheet.reload()
+		self.assertTrue(self.sheet.semester_mark_approved)
+
+	def test_a_coursework_cell_sent_back_unchanged_leaves_it_on(self):
+		"""The grid sends every cell that fired a change, including one typed over
+		and put back. Riding along with a batch of exam marks, that took the DP
+		away from students and said a coursework mark had changed when none had."""
+		self.sheet.approve_semester_mark()
+		coursework = self.entry_of("Coursework")
+		exam = self.entry_of("Examination")
+
+		self.sheet.workflow_state = "In Entry"
+		result = self.sheet.save_marks(
+			[
+				{
+					"student": coursework.student,
+					"assessment_group": coursework.assessment_group,
+					"status": coursework.status,
+					"raw_score": coursework.raw_score,
+				},
+				{
+					"student": exam.student,
+					"assessment_group": exam.assessment_group,
+					"status": "Marked",
+					"raw_score": 1,
+				},
+			]
+		)
+
+		self.assertFalse(result["semester_mark_withdrawn"])
+		self.sheet.reload()
+		self.assertTrue(self.sheet.semester_mark_approved)
+
 	def test_withdrawing_takes_it_back_from_students(self):
 		self.sheet.approve_semester_mark()
 		self.assertTrue(self.seen_by_students())

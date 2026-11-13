@@ -534,6 +534,15 @@ class CourseMarkSheet(Document):
 			)
 			by_student[entry.student][entry.assessment_group] = entry
 
+		# Coursework first, then the semester mark it adds up to, then the exams:
+		# the order the entry grid draws its columns in, so the paper reads left
+		# to right the way the mark is built. Split the way the entry grid splits
+		# it -- anything the scheme does not call coursework is on the exam side
+		# -- and otherwise left in the order the sheet carries them.
+		components = self.assessment_components()
+		coursework = [a for a in assessments if components.get(a) == COURSEWORK]
+		examination = [a for a in assessments if components.get(a) != COURSEWORK]
+
 		# A failed total is not a reason to refuse to print the marks, but it
 		# must not read as a student with nothing entered either -- the same
 		# reasoning as the entry grid, which shows "?" rather than a dash.
@@ -548,18 +557,25 @@ class CourseMarkSheet(Document):
 
 		for row in rows:
 			cells = row.pop("cells")
-			row["cells"] = [
-				self.printed_mark(cells.get(assessment)) for assessment in assessments
-			]
+			row["coursework"] = [self.printed_mark(cells.get(a)) for a in coursework]
+			row["examination"] = [self.printed_mark(cells.get(a)) for a in examination]
+			row["cells"] = row["coursework"] + row["examination"]
 			total = totals.get(row["student"]) or {}
 			row["dp"] = "?" if totals_failed else total.get("dp", NO_MARK)
 			row["final_mark"] = "?" if totals_failed else total.get("final_mark", NO_MARK)
 
-		return {
-			"assessments": [
+		def columns(groups):
+			return [
 				{"assessment_group": assessment, "out_of": f"{maximum[assessment]:g}"}
-				for assessment in assessments
-			],
+				for assessment in groups
+			]
+
+		return {
+			"coursework": columns(coursework),
+			"examination": columns(examination),
+			# Both halves in print order, for anything that wants every column
+			# without caring where the semester mark falls.
+			"assessments": columns(coursework + examination),
 			# A supplementary sheet is one paper standing in for an exam, not a
 			# course, so it has no semester or final mark of its own -- the same
 			# rule the entry grid and `mark_totals` go by.

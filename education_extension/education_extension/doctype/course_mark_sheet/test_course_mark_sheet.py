@@ -1061,6 +1061,97 @@ class TestThePrintedMarkSheet(FrappeTestCase):
 		doc = sheet_with([("S1", "Test 1", MARKED, 60, 0)])
 		self.assertIsNone(doc.mark_grid()["moderation"])
 
+	def test_the_coursework_is_printed_before_the_exams(self):
+		"""The semester mark sits between the two halves, so they cannot be
+		left in whatever order the sheet happened to store them -- an exam
+		stored first would print on the coursework side of it."""
+		doc = sheet_with(
+			[
+				("S1", "Theory Exam", MARKED, 70, 0),
+				("S1", "Test 1", MARKED, 60, 0),
+				("S1", "Oral Exam", MARKED, 80, 0),
+				("S1", "Assignment 1", MARKED, 50, 0),
+			]
+		)
+		components = {
+			"Theory Exam": "Examination",
+			"Test 1": "Coursework",
+			"Oral Exam": "Examination",
+			"Assignment 1": "Coursework",
+		}
+		with patch.object(type(doc), "assessment_components", return_value=components):
+			grid = doc.mark_grid()
+
+		def groups(columns):
+			return [column["assessment_group"] for column in columns]
+
+		self.assertEqual(groups(grid["coursework"]), ["Test 1", "Assignment 1"])
+		self.assertEqual(groups(grid["examination"]), ["Theory Exam", "Oral Exam"])
+		self.assertEqual(
+			groups(grid["assessments"]), ["Test 1", "Assignment 1", "Theory Exam", "Oral Exam"]
+		)
+		row = grid["rows"][0]
+		self.assertEqual([cell["text"] for cell in row["coursework"]], ["60", "50"])
+		self.assertEqual([cell["text"] for cell in row["examination"]], ["70", "80"])
+		self.assertEqual([cell["text"] for cell in row["cells"]], ["60", "50", "70", "80"])
+
+	def test_the_semester_mark_is_printed_between_coursework_and_exams(self):
+		"""Rendered, because the order is the template's to get right: the
+		entry grid reads coursework, semester mark, exams, final mark, and the
+		paper it is checked against has to read the same way."""
+		if not frappe.db.exists("Print Format", self.PRINT_FORMAT):
+			self.skipTest("the print format is not installed on this site")
+		grid = self.sheet.mark_grid()
+		if not (grid["coursework"] and grid["examination"]):
+			self.skipTest("this sheet does not have both coursework and exams")
+
+		html = frappe.get_print(
+			"Course Mark Sheet", self.sheet.name, print_format=self.PRINT_FORMAT
+		)
+		head = html[html.index('<table class="grid-marks">') : html.index("</thead>")]
+
+		def at(text):
+			self.assertIn(text, head)
+			return head.index(text)
+
+		semester_mark = at('<th class="col-total">Semester Mark</th>')
+		final_mark = at('<th class="col-total">Final Mark</th>')
+		for column in grid["coursework"]:
+			self.assertLess(at(column["assessment_group"]), semester_mark, column)
+		for column in grid["examination"]:
+			self.assertGreater(at(column["assessment_group"]), semester_mark, column)
+			self.assertLess(at(column["assessment_group"]), final_mark, column)
+		self.assertNotIn(">DP<", head)
+
+	def test_the_sheet_is_headed_with_its_module(self):
+		if not frappe.db.exists("Print Format", self.PRINT_FORMAT):
+			self.skipTest("the print format is not installed on this site")
+		html = frappe.get_print(
+			"Course Mark Sheet", self.sheet.name, print_format=self.PRINT_FORMAT
+		)
+		identity = html[html.index('<table class="grid-identity">') :]
+		identity = identity[: identity.index("</table>")]
+
+		self.assertIn('<td class="id-label">Module</td>', identity)
+		self.assertNotIn(">Course<", identity)
+		# Left off on purpose: the scheme and the workflow state are for the desk,
+		# not for the paper that gets signed and filed.
+		self.assertNotIn("Mark Scheme", identity)
+		self.assertNotIn(">Status<", identity)
+
+	def test_no_heading_cell_is_styled_as_a_bootstrap_label(self):
+		"""Frappe's print bundle carries Bootstrap, whose `.label` is inline at
+		75% and whose `.label:empty` is not displayed. On a td that shrank every
+		heading and dropped the blank Student Group cell out of its row, which
+		slid Printed one column left -- correct HTML, wrong PDF, and nothing
+		raised to say so."""
+		if not frappe.db.exists("Print Format", self.PRINT_FORMAT):
+			self.skipTest("the print format is not installed on this site")
+		html = frappe.get_print(
+			"Course Mark Sheet", self.sheet.name, print_format=self.PRINT_FORMAT
+		)
+		self.assertNotRegex(html, r'class="(label|label \S[^"]*|[^"]*\slabel)"')
+
 	def test_a_total_that_cannot_be_worked_out_says_so(self):
 		"""A dash is what an unmarked student shows, so a failure that printed
 		one would read as "no marks yet" and be invisible. The entry grid shows

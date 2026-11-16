@@ -9,6 +9,12 @@ readme = "README.md"
 dynamic = ["version"]
 dependencies = [
     # "frappe~=16.0.0" # Installed and managed by bench.
+    # Not ours, but the desk depends on it: `payments` allows razorpay 2.0.0,
+    # which imports pkg_resources at load, and setuptools 81+ no longer ships
+    # it. A sidebar permission check loads Razorpay Settings, so on a bench
+    # with 2.0.0 every non-Administrator who can read it fails to boot the desk.
+    # 2.0.1 only falls back to pkg_resources. Still inside payments' ~=2.0.0.
+    "razorpay>=2.0.1",
 ]
 
 [build-system]

@@ -1139,6 +1139,55 @@ class TestThePrintedMarkSheet(FrappeTestCase):
 		self.assertNotIn("Mark Scheme", identity)
 		self.assertNotIn(">Status<", identity)
 
+	def test_each_student_is_printed_with_the_remark_qa_filed(self):
+		"""Blank where none has been added yet: a sheet printed for checking
+		needs somewhere to write it, not a dash that reads as an answer."""
+		from education_extension.education_extension import marking
+
+		doc = sheet_with(
+			[("S1", "Test 1", MARKED, 60, 0), ("S2", "Test 1", MARKED, 40, 0)]
+		)
+		with patch.object(marking, "_course_remarks", return_value={"S1": "PD"}) as remarks:
+			grid = doc.mark_grid()
+
+		self.assertEqual(remarks.call_args.args[2:], ("Academic Remark", "remark"))
+		self.assertEqual({row["student"]: row["remark"] for row in grid["rows"]}, {"S1": "PD", "S2": ""})
+
+	def test_a_supplementary_sheet_prints_the_supplementary_remark(self):
+		"""A supplementary is its own result with its own comment. Printing the
+		course's Academic Remark there would show SUPP against every student --
+		the reason they are on the sheet, not what they made of it."""
+		from education_extension.education_extension import marking
+
+		doc = sheet_with([("S1", "Supplementary Exam", MARKED, 60, 0)])
+		doc.sitting = "Supplementary"
+		with patch.object(marking, "_course_remarks", return_value={"S1": "PS"}) as remarks:
+			grid = doc.mark_grid()
+
+		self.assertEqual(
+			remarks.call_args.args[2:], ("Supplementary Academic Remark", "supp_remark")
+		)
+		self.assertEqual(grid["rows"][0]["remark"], "PS")
+
+	def test_the_format_prints_the_remark_column(self):
+		"""Rendered, so a template that never reads `row.remark` cannot pass on
+		the strength of the dict alone."""
+		from education_extension.education_extension import marking
+
+		if not frappe.db.exists("Print Format", self.PRINT_FORMAT):
+			self.skipTest("the print format is not installed on this site")
+		first = self.sheet.entries[0].student
+		with patch.object(marking, "_course_remarks", return_value={first: "PD"}):
+			html = frappe.get_print(
+				"Course Mark Sheet", self.sheet.name, print_format=self.PRINT_FORMAT
+			)
+
+		self.assertIn('<th class="col-remark">Remark</th>', html)
+		self.assertIn('<td class="col-remark">PD</td>', html)
+		# Every other student on the sheet gets an empty box.
+		students = len({entry.student for entry in self.sheet.entries})
+		self.assertEqual(html.count('<td class="col-remark"></td>'), students - 1)
+
 	def test_no_heading_cell_is_styled_as_a_bootstrap_label(self):
 		"""Frappe's print bundle carries Bootstrap, whose `.label` is inline at
 		75% and whose `.label:empty` is not displayed. On a td that shrank every

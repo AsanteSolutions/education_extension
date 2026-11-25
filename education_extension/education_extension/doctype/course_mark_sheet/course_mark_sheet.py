@@ -294,11 +294,7 @@ class CourseMarkSheet(Document):
 		what QA made of it. A sheet reaching approval with comments missing means
 		nobody said what those marks amount to, which is the checking step half
 		done rather than finished."""
-		doctype, fieldname = (
-			("Supplementary Academic Remark", "supp_remark")
-			if self.sitting == SUPPLEMENTARY
-			else ("Academic Remark", "remark")
-		)
+		doctype, fieldname = self.remark_source()
 
 		commented = {
 			row.student
@@ -322,6 +318,14 @@ class CourseMarkSheet(Document):
 					len(missing), frappe.bold(missing[0])
 				)
 			)
+
+	def remark_source(self):
+		"""Where QA's comment on this sheet's results is filed. A supplementary
+		is its own result with its own comment; a main or aegrotat sheet settles
+		the course, so its comment is the course's Academic Remark."""
+		if self.sitting == SUPPLEMENTARY:
+			return "Supplementary Academic Remark", "supp_remark"
+		return "Academic Remark", "remark"
 
 	# -- marks ---------------------------------------------------------------
 
@@ -555,7 +559,17 @@ class CourseMarkSheet(Document):
 				frappe.log_error(title=f"Mark grid totals: {self.name}")
 				totals_failed = True
 
+		# QA's comment on each result, as filed: printed where it has been added
+		# and left blank where it has not, so a sheet printed for checking has a
+		# box to write it in. Read from the remark records the QA review writes,
+		# which is what approval checks for, so the paper and the approval
+		# cannot disagree about who has one.
+		from education_extension.education_extension.marking import _course_remarks
+
+		remarks = _course_remarks(self.course, self.academic_term, *self.remark_source())
+
 		for row in rows:
+			row["remark"] = remarks.get(row["student"], "")
 			cells = row.pop("cells")
 			row["coursework"] = [self.printed_mark(cells.get(a)) for a in coursework]
 			row["examination"] = [self.printed_mark(cells.get(a)) for a in examination]
